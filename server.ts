@@ -21,7 +21,7 @@ async function startDevBridge(): Promise<void> {
   }
 
   const app = express();
-  const port = 3000;
+  const port = Number(process.env.PORT ?? 3000);
 
   // Mount the DokanOS Express 5 API application (/health and /api/v1/*)
   app.use(apiApp);
