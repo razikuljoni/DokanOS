@@ -58,6 +58,7 @@ export const createSaleSchema = z.object({
   paidAmount: z.number().nonnegative('Paid amount cannot be negative'),
   customerName: z.string().trim().max(80).optional(),
   customerPhone: z.string().trim().max(25).optional(),
+  idempotencyKey: z.string().trim().min(8).max(128).optional(),
 });
 
 export const purchaseItemInputSchema = z.object({
@@ -83,6 +84,7 @@ export const updateSupplierSchema = createSupplierSchema.partial();
 export const recordDuePaymentSchema = z.object({
   amount: z.number().positive('Payment amount must be greater than zero'),
   method: z.enum(PAYMENT_METHODS).default('cash'),
+  idempotencyKey: z.string().trim().min(8).max(128).optional(),
 });
 
 export const updateTenantSettingsSchema = z.object({

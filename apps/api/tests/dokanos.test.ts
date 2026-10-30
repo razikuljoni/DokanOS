@@ -525,4 +525,288 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
     expect(invalidRes.body.error.code).toBe(ERROR_CODES.VALIDATION);
     expect(invalidRes.body.error.details).toBeDefined();
   });
+
+  // 9. Phase 1 — Offline POS & Baki sync idempotency and failure handling
+  it('9a. Offline sync: queued POS sale and Baki due payment sync once, assign sequential server invoiceNo, and decrement stock/due once', async () => {
+    const shop = await registerShop({ shopName: 'Offline Sync Shop', email: 'owner@offline.bd' });
+
+    const prodRes = await request(app)
+      .post('/api/v1/products')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({
+        name: 'Sergel 20mg Capsule',
+        category: 'Medicine',
+        unit: 'strip',
+        sku: 'OFF-SER-01',
+        costPrice: 55,
+        sellPrice: 70,
+        stock: 10,
+      });
+    expect(prodRes.status).toBe(201);
+    const productId = prodRes.body.data._id as string;
+
+    // Replay queued offline sale with idempotencyKey
+    const saleIdemKey = `idem-sale-${shop.tenantId}-10001`;
+    const syncSaleRes = await request(app)
+      .post('/api/v1/sales')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .set('X-Idempotency-Key', saleIdemKey)
+      .send({
+        idempotencyKey: saleIdemKey,
+        items: [{ productId, qty: 3 }],
+        discount: 0,
+        paymentMethod: 'cash',
+        paidAmount: 100, // 210 total -> 110 Baki due
+        customerName: 'Karim Bhai',
+        customerPhone: '01711223344',
+      });
+
+    expect(syncSaleRes.status).toBe(201);
+    expect(syncSaleRes.body.data.invoiceNo).toBe('INV-0001');
+    expect(syncSaleRes.body.data.dueAmount).toBe(110);
+
+    const afterSaleProd = await ProductModel.findById(productId).lean();
+    expect(afterSaleProd?.stock).toBe(7);
+  });
+
+  it('9b. Offline sync idempotency: replaying the same idempotencyKey twice for a sale or due payment is a no-op on the second call', async () => {
+    const shop = await registerShop({ shopName: 'Idem Shop', email: 'owner@idem.bd' });
+
+    const prodRes = await request(app)
+      .post('/api/v1/products')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({
+        name: 'Monas 10mg Tablet',
+        category: 'Medicine',
+        unit: 'box',
+        sku: 'IDEM-MON-10',
+        costPrice: 180,
+        sellPrice: 240,
+        stock: 15,
+      });
+    const productId = prodRes.body.data._id as string;
+
+    const saleIdemKey = `idem-sale-${shop.tenantId}-replay-01`;
+    const salePayload = {
+      idempotencyKey: saleIdemKey,
+      items: [{ productId, qty: 2 }],
+      discount: 0,
+      paymentMethod: 'cash',
+      paidAmount: 200, // total 480, due 280
+      customerName: 'Rahima Begum',
+    };
+
+    const firstSale = await request(app)
+      .post('/api/v1/sales')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send(salePayload);
+    expect(firstSale.status).toBe(201);
+    const saleId = firstSale.body.data._id as string;
+
+    // Duplicate replay of the exact same offline sale
+    const secondSale = await request(app)
+      .post('/api/v1/sales')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send(salePayload);
+    expect(secondSale.status).toBe(200);
+    expect(secondSale.body.duplicate).toBe(true);
+    expect(secondSale.body.data._id).toBe(saleId);
+    expect(secondSale.body.data.invoiceNo).toBe('INV-0001');
+
+    // Verify stock was decremented once (15 - 2 = 13, not 11)
+    const prodAfterDup = await ProductModel.findById(productId).lean();
+    expect(prodAfterDup?.stock).toBe(13);
+
+    // Now test duplicate replay of an offline due payment
+    const dueIdemKey = `idem-due-${shop.tenantId}-replay-01`;
+    const duePay1 = await request(app)
+      .post(`/api/v1/dues/${saleId}/payments`)
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({
+        idempotencyKey: dueIdemKey,
+        amount: 100,
+        method: 'bkash',
+      });
+    expect(duePay1.status).toBe(201);
+
+    const duePay2 = await request(app)
+      .post(`/api/v1/dues/${saleId}/payments`)
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({
+        idempotencyKey: dueIdemKey,
+        amount: 100,
+        method: 'bkash',
+      });
+    expect(duePay2.status).toBe(200);
+    expect(duePay2.body.duplicate).toBe(true);
+
+    // Remaining due must be 280 - 100 = 180 (not 80)
+    const updatedSale = await SaleModel.findById(saleId).lean();
+    expect(updatedSale?.dueAmount).toBe(180);
+  });
+
+  it('9c. Offline sync conflict: a queued offline sale that fails server validation (stock=0) returns 409 INSUFFICIENT_STOCK and does not corrupt stock', async () => {
+    const shop = await registerShop({ shopName: 'Conflict Shop', email: 'owner@conflict.bd' });
+
+    const prodRes = await request(app)
+      .post('/api/v1/products')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({
+        name: 'Out of Stock Inhaler',
+        category: 'Medicine',
+        unit: 'pcs',
+        sku: 'CONF-001',
+        costPrice: 200,
+        sellPrice: 280,
+        stock: 0,
+      });
+    const productId = prodRes.body.data._id as string;
+
+    const failedSync = await request(app)
+      .post('/api/v1/sales')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({
+        idempotencyKey: `idem-sale-${shop.tenantId}-conflict-01`,
+        items: [{ productId, qty: 1 }],
+        discount: 0,
+        paymentMethod: 'cash',
+        paidAmount: 280,
+      });
+
+    expect(failedSync.status).toBe(409);
+    expect(failedSync.body.error.code).toBe(ERROR_CODES.INSUFFICIENT_STOCK);
+
+    const prodCheck = await ProductModel.findById(productId).lean();
+    expect(prodCheck?.stock).toBe(0);
+    const salesCount = await SaleModel.countDocuments({ tenantId: shop.tenantId });
+    expect(salesCount).toBe(0);
+  });
+
+  // 10. Phase 3 (§4.1.4) — SSLCommerz GET browser redirect callback & FRONTEND_URL redirect
+  it('10a & 10c. SSLCommerz GET browser redirect: GET /api/v1/billing/sslcommerz/success?tran_id=... applies payment without Authorization header and redirects to env.FRONTEND_URL', async () => {
+    const shop = await registerShop({ shopName: 'GET Callback Shop', email: 'owner@getcb.bd' });
+
+    const initRes = await request(app)
+      .post('/api/v1/billing/sslcommerz/init')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({});
+    expect(initRes.status).toBe(201);
+    const tranId = initRes.body.data.tranId as string;
+
+    const beforeMs = Date.now();
+
+    // Unauthenticated browser GET redirect from SSLCommerz sandbox
+    const getCallbackRes = await request(app)
+      .get(`/api/v1/billing/sslcommerz/success?tran_id=${encodeURIComponent(tranId)}&val_id=VAL-GET-01`)
+      .set('Accept', 'text/html,application/xhtml+xml');
+
+    expect(getCallbackRes.status).toBe(302);
+    const location = getCallbackRes.headers['location'] ?? '';
+    expect(location.startsWith('http://localhost:5173/app/billing?status=success&tran_id=')).toBe(
+      true,
+    );
+    expect(location).toContain(encodeURIComponent(tranId));
+
+    const payment = await PaymentModel.findOne({ provider: 'sslcommerz', eventId: tranId }).lean();
+    expect(payment?.status).toBe('paid');
+
+    const tenant = await TenantModel.findById(shop.tenantId).lean();
+    expect(tenant?.plan).toBe('pro');
+    const daysAdded =
+      (new Date(tenant!.planExpiresAt!).getTime() - beforeMs) / (1000 * 60 * 60 * 24);
+    expect(daysAdded).toBeGreaterThan(29.5);
+    expect(daysAdded).toBeLessThan(30.5);
+  });
+
+  it('10b. SSLCommerz GET browser redirect with unknown tran_id returns 404 and changes nothing', async () => {
+    const shop = await registerShop({ shopName: 'Unknown Tran Shop', email: 'owner@unk.bd' });
+
+    const res = await request(app).get('/api/v1/billing/sslcommerz/success?tran_id=UNKNOWN_TRAN_999');
+    expect(res.status).toBe(404);
+
+    const tenant = await TenantModel.findById(shop.tenantId).lean();
+    expect(tenant?.plan).toBe('free');
+    expect(tenant?.planExpiresAt).toBeNull();
+  });
+
+  // 11. Phase 4 (§5) — Full End-to-End Sandbox Payment Proof (SSLCommerz Primary + Stripe Test Mode Secondary)
+  it('11. Phase 4 E2E Payment Proof: Free tenant upgrades via SSLCommerz Sandbox & Stripe Test Mode with GET/POST callback + IPN replay idempotency', async () => {
+    const shop = await registerShop({
+      shopName: 'Phase 4 Sandbox Proof Pharmacy',
+      email: 'proof@dokanos.bd',
+    });
+
+    // Verify initial Free state
+    const initialPlanRes = await request(app)
+      .get('/api/v1/billing/plan')
+      .set('Authorization', `Bearer ${shop.accessToken}`);
+    expect(initialPlanRes.status).toBe(200);
+    expect(initialPlanRes.body.data.plan).toBe('free');
+    expect(initialPlanRes.body.data.planExpiresAt).toBeNull();
+
+    // Step 2: Initiate SSLCommerz Sandbox Checkout
+    const initRes = await request(app)
+      .post('/api/v1/billing/sslcommerz/init')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({});
+    expect(initRes.status).toBe(201);
+    const tranId = initRes.body.data.tranId as string;
+    expect(tranId).toMatch(/^DKN-/);
+
+    const pendingPayment = await PaymentModel.findOne({
+      provider: 'sslcommerz',
+      eventId: tranId,
+    }).lean();
+    expect(pendingPayment?.status).toBe('pending');
+    expect(pendingPayment?.amount).toBe(499);
+
+    // Step 3: Complete payment via browser GET redirect to /api/v1/billing/sslcommerz/success
+    const getSuccessRes = await request(app)
+      .get(`/api/v1/billing/sslcommerz/success?tran_id=${encodeURIComponent(tranId)}&val_id=VAL-SANDBOX-PROOF-01`)
+      .set('Accept', 'text/html');
+    expect(getSuccessRes.status).toBe(302);
+    expect(getSuccessRes.headers['location']).toBe(
+      `http://localhost:5173/app/billing?status=success&tran_id=${encodeURIComponent(tranId)}`,
+    );
+
+    // Step 4: Verify database state after callback
+    const paidPayment = await PaymentModel.findOne({
+      provider: 'sslcommerz',
+      eventId: tranId,
+    }).lean();
+    expect(paidPayment?.status).toBe('paid');
+
+    const upgradedTenant = await TenantModel.findById(shop.tenantId).lean();
+    expect(upgradedTenant?.plan).toBe('pro');
+    expect(upgradedTenant?.planExpiresAt).not.toBeNull();
+    const firstExpiresAtIso = new Date(upgradedTenant!.planExpiresAt!).toISOString();
+
+    const activeSub = await SubscriptionModel.findOne({
+      tenantId: shop.tenantId,
+      provider: 'sslcommerz',
+    }).lean();
+    expect(activeSub?.status).toBe('active');
+    expect(activeSub?.plan).toBe('pro');
+
+    // Step 5: Replay idempotency check via POST /ipn AND GET /success
+    const ipnReplay = await request(app)
+      .post('/api/v1/billing/sslcommerz/ipn')
+      .send({
+        tran_id: tranId,
+        val_id: 'VAL-SANDBOX-PROOF-01',
+        amount: 499,
+        currency: 'BDT',
+        status: 'VALID',
+      });
+    expect(ipnReplay.status).toBe(200);
+    expect(ipnReplay.body.data.duplicate).toBe(true);
+
+    const getReplay = await request(app)
+      .get(`/api/v1/billing/sslcommerz/success?tran_id=${encodeURIComponent(tranId)}&format=json`);
+    expect(getReplay.status).toBe(200);
+    expect(getReplay.body.data.duplicate).toBe(true);
+
+    const tenantAfterReplays = await TenantModel.findById(shop.tenantId).lean();
+    expect(new Date(tenantAfterReplays!.planExpiresAt!).toISOString()).toBe(firstExpiresAtIso);
+  });
 });

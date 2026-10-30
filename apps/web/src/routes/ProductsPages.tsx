@@ -5,6 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
   ArrowLeft,
+  CloudOff,
   Download,
   Edit3,
   Eye,
@@ -22,7 +23,9 @@ import {
 } from '@dokanos/shared';
 import { useAuthStore } from '@/stores/authStore';
 import { useUiStore } from '@/stores/uiStore';
+import { useIsOffline } from '@/stores/offlineStore';
 import { ApiClientError, apiFetch } from '@/lib/api';
+import { getTenantSnapshot, saveTenantSnapshot } from '@/lib/offlineCache';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -51,7 +54,8 @@ export function ProductsListPage(): React.ReactElement {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const canWrite = user?.role === 'owner' || user?.role === 'manager';
+  const isOffline = useIsOffline();
+  const canWrite = (user?.role === 'owner' || user?.role === 'manager') && !isOffline;
 
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState(searchParams.get('search') ?? '');
@@ -65,17 +69,49 @@ export function ProductsListPage(): React.ReactElement {
   );
 
   const { data, isLoading } = useQuery({
-    queryKey: ['products', tenant?.id, { page, search, stockStatus }],
-    queryFn: () => {
-      const params = new URLSearchParams({
-        page: String(page),
-        limit: '15',
-      });
-      if (search.trim()) params.set('search', search.trim());
-      if (stockStatus !== 'all') params.set('stockStatus', stockStatus);
-      return apiFetch<{ data: ProductRow[]; meta: PaginationMeta }>(
-        `/api/v1/products?${params.toString()}`,
-      );
+    queryKey: ['products', tenant?.id, { page, search, stockStatus, mode: isOffline ? 'offline' : 'online' }],
+    queryFn: async (): Promise<{ data: ProductRow[]; meta?: PaginationMeta; fromCache?: boolean }> => {
+      if (!tenant?.id) return { data: [] };
+
+      if (isOffline) {
+        const snap = await getTenantSnapshot<ProductRow[]>(tenant.id, 'pos-products');
+        const list = (snap?.data ?? []).filter((p) => {
+          if (stockStatus === 'low' && !(p.stock > 0 && p.stock <= p.lowStockAt)) return false;
+          if (stockStatus === 'out' && p.stock !== 0) return false;
+          if (!search.trim()) return true;
+          const q = search.trim().toLowerCase();
+          return (
+            p.name.toLowerCase().includes(q) ||
+            p.sku.toLowerCase().includes(q) ||
+            p.category.toLowerCase().includes(q)
+          );
+        });
+        return { data: list, fromCache: true };
+      }
+
+      try {
+        const params = new URLSearchParams({
+          page: String(page),
+          limit: '15',
+        });
+        if (search.trim()) params.set('search', search.trim());
+        if (stockStatus !== 'all') params.set('stockStatus', stockStatus);
+        const res = await apiFetch<{ data: ProductRow[]; meta: PaginationMeta }>(
+          `/api/v1/products?${params.toString()}`,
+        );
+        if (page === 1 && !search.trim() && stockStatus === 'all') {
+          await saveTenantSnapshot(tenant.id, 'pos-products', res.data);
+        }
+        return { ...res, fromCache: false };
+      } catch (err) {
+        if (!(err instanceof ApiClientError)) {
+          const snap = await getTenantSnapshot<ProductRow[]>(tenant.id, 'pos-products');
+          if (snap) {
+            return { data: snap.data, fromCache: true };
+          }
+        }
+        throw err;
+      }
     },
     enabled: Boolean(tenant?.id),
   });
@@ -374,6 +410,13 @@ export function ProductsListPage(): React.ReactElement {
           )}
         </div>
       </div>
+
+      {(isOffline || data?.fromCache) && (
+        <div className="rounded-md border border-warning/40 bg-warning/15 px-4 py-2.5 flex items-center gap-2 text-xs font-medium text-warning">
+          <CloudOff className="h-4 w-4 shrink-0" />
+          <span>Offline — showing cached data</span>
+        </div>
+      )}
 
       {/* Search & Stock Filters */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">

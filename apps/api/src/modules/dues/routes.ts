@@ -210,6 +210,23 @@ duesRouter.post('/:refId/payments', requirePermission('dues:write'), async (req,
     const tenantObjectId = new Types.ObjectId(req.tenant!.id);
     const userObjectId = new Types.ObjectId(req.user!.id);
 
+    const headerKey =
+      typeof req.headers['x-idempotency-key'] === 'string'
+        ? req.headers['x-idempotency-key'].trim()
+        : undefined;
+    const idempotencyKey = parsed.idempotencyKey || headerKey;
+
+    if (idempotencyKey) {
+      const existingPayment = await DuePaymentModel.findOne({
+        tenantId: tenantObjectId,
+        idempotencyKey,
+      }).lean();
+      if (existingPayment) {
+        res.status(200).json({ data: existingPayment, duplicate: true });
+        return;
+      }
+    }
+
     let createdPayment: Awaited<ReturnType<typeof DuePaymentModel.findOne>> = null;
 
     await session.withTransaction(async () => {
@@ -232,6 +249,7 @@ duesRouter.post('/:refId/payments', requirePermission('dues:write'), async (req,
           [
             {
               tenantId: tenantObjectId,
+              ...(idempotencyKey ? { idempotencyKey } : {}),
               partyType: 'customer',
               partyName: sale.customerName || 'Walk-in Customer',
               partyPhone: sale.customerPhone || '',
@@ -276,6 +294,7 @@ duesRouter.post('/:refId/payments', requirePermission('dues:write'), async (req,
           [
             {
               tenantId: tenantObjectId,
+              ...(idempotencyKey ? { idempotencyKey } : {}),
               partyType: 'supplier',
               partyName: supplier?.name ?? 'Supplier',
               partyPhone: supplier?.phone ?? '',

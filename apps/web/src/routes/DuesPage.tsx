@@ -173,9 +173,15 @@ export function DuesPage(): React.ReactElement {
       rawAmt,
     );
 
-    const nowIso = new Date().toISOString();
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    const idempotencyKey = `idem-due-${tenant.id}-${nowMs}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
+
     await enqueueOutboxItem({
-      id: `offline-due-${Date.now()}`,
+      id: `offline-due-${nowMs}`,
+      idempotencyKey,
       tenantId: tenant.id,
       type: 'due_payment',
       title: `Baki Payment (${paymentTarget.refNo})`,
@@ -184,6 +190,7 @@ export function DuesPage(): React.ReactElement {
       createdAt: nowIso,
       status: 'pending',
       duePaymentPayload: {
+        idempotencyKey,
         refId: paymentTarget.refId,
         amount: appliedAmount,
         method: paymentMethod,

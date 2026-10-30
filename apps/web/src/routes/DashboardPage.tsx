@@ -15,9 +15,11 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { ArrowRight, Plus } from 'lucide-react';
+import { ArrowRight, CloudOff, Plus } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
-import { apiFetch } from '@/lib/api';
+import { useIsOffline } from '@/stores/offlineStore';
+import { apiFetch, ApiClientError } from '@/lib/api';
+import { getTenantSnapshot, saveTenantSnapshot } from '@/lib/offlineCache';
 import { Button } from '@/components/ui/button';
 import {
   ChartCard,
@@ -71,16 +73,53 @@ const CHART_COLORS = ['#14532D', '#B45309', '#57534E', '#1C1917', '#78716C'];
 
 export function DashboardPage(): React.ReactElement {
   const tenant = useAuthStore((s) => s.tenant);
+  const isOffline = useIsOffline();
 
   const { data: summaryRes, isLoading: summaryLoading } = useQuery({
-    queryKey: ['dashboard', tenant?.id, 'summary'],
-    queryFn: () => apiFetch<{ data: DashboardSummary }>('/api/v1/dashboard/summary'),
+    queryKey: ['dashboard', tenant?.id, 'summary', isOffline ? 'offline' : 'online'],
+    queryFn: async (): Promise<{ data: DashboardSummary; fromCache?: boolean }> => {
+      if (!tenant?.id) {
+        throw new Error('Missing tenant');
+      }
+      if (isOffline) {
+        const snap = await getTenantSnapshot<DashboardSummary>(tenant.id, 'dashboard-summary');
+        if (snap) return { data: snap.data, fromCache: true };
+      }
+      try {
+        const res = await apiFetch<{ data: DashboardSummary }>('/api/v1/dashboard/summary');
+        await saveTenantSnapshot(tenant.id, 'dashboard-summary', res.data);
+        return { data: res.data, fromCache: false };
+      } catch (err) {
+        if (!(err instanceof ApiClientError)) {
+          const snap = await getTenantSnapshot<DashboardSummary>(tenant.id, 'dashboard-summary');
+          if (snap) return { data: snap.data, fromCache: true };
+        }
+        throw err;
+      }
+    },
     enabled: Boolean(tenant?.id),
   });
 
   const { data: trendRes, isLoading: trendLoading } = useQuery({
-    queryKey: ['dashboard', tenant?.id, 'trend'],
-    queryFn: () => apiFetch<{ data: SalesTrendPoint[] }>('/api/v1/dashboard/sales-trend'),
+    queryKey: ['dashboard', tenant?.id, 'trend', isOffline ? 'offline' : 'online'],
+    queryFn: async (): Promise<{ data: SalesTrendPoint[]; fromCache?: boolean }> => {
+      if (!tenant?.id) return { data: [] };
+      if (isOffline) {
+        const snap = await getTenantSnapshot<SalesTrendPoint[]>(tenant.id, 'dashboard-trend');
+        return { data: snap?.data ?? [], fromCache: true };
+      }
+      try {
+        const res = await apiFetch<{ data: SalesTrendPoint[] }>('/api/v1/dashboard/sales-trend');
+        await saveTenantSnapshot(tenant.id, 'dashboard-trend', res.data);
+        return { data: res.data, fromCache: false };
+      } catch (err) {
+        if (!(err instanceof ApiClientError)) {
+          const snap = await getTenantSnapshot<SalesTrendPoint[]>(tenant.id, 'dashboard-trend');
+          if (snap) return { data: snap.data, fromCache: true };
+        }
+        throw err;
+      }
+    },
     enabled: Boolean(tenant?.id),
   });
 
@@ -166,6 +205,13 @@ export function DashboardPage(): React.ReactElement {
           </Link>
         </div>
       </div>
+
+      {(isOffline || summaryRes?.fromCache) && (
+        <div className="rounded-md border border-warning/40 bg-warning/15 px-4 py-2.5 flex items-center gap-2 text-xs font-medium text-warning">
+          <CloudOff className="h-4 w-4 shrink-0" />
+          <span>Offline — showing cached data</span>
+        </div>
+      )}
 
       {/* Low Stock Banner */}
       {summary && <LowStockBanner count={summary.lowStockCount} />}

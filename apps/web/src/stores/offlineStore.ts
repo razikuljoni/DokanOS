@@ -91,17 +91,33 @@ export const useOfflineStore = create<OfflineState>((set, get) => ({
         await get().refreshOfflineState(tenantId);
 
         try {
+          const idemKey =
+            item.idempotencyKey ||
+            item.salePayload?.idempotencyKey ||
+            item.duePaymentPayload?.idempotencyKey ||
+            `idem-${item.id}`;
+
           if (item.type === 'pos_sale' && item.salePayload) {
             await apiFetch('/api/v1/sales', {
               method: 'POST',
-              body: JSON.stringify(item.salePayload),
+              headers: {
+                'X-Idempotency-Key': idemKey,
+              },
+              body: JSON.stringify({
+                ...item.salePayload,
+                idempotencyKey: idemKey,
+              }),
             });
           } else if (item.type === 'due_payment' && item.duePaymentPayload) {
             await apiFetch(`/api/v1/dues/${item.duePaymentPayload.refId}/payments`, {
               method: 'POST',
+              headers: {
+                'X-Idempotency-Key': idemKey,
+              },
               body: JSON.stringify({
                 amount: item.duePaymentPayload.amount,
                 method: item.duePaymentPayload.method,
+                idempotencyKey: idemKey,
               }),
             });
           }

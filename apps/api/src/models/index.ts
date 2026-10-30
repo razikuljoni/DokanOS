@@ -235,6 +235,7 @@ export interface ISale extends Document {
   _id: Types.ObjectId;
   tenantId: Types.ObjectId;
   invoiceNo: string;
+  idempotencyKey?: string;
   items: ISaleItem[];
   subtotal: number;
   discount: number;
@@ -267,6 +268,7 @@ const saleSchema = new Schema<ISale>(
   {
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true },
     invoiceNo: { type: String, required: true },
+    idempotencyKey: { type: String, trim: true },
     items: { type: [saleItemSchema], required: true },
     subtotal: { type: Number, required: true, min: 0 },
     discount: { type: Number, required: true, default: 0, min: 0 },
@@ -285,6 +287,10 @@ const saleSchema = new Schema<ISale>(
 
 saleSchema.index({ tenantId: 1, createdAt: -1 });
 saleSchema.index({ tenantId: 1, invoiceNo: 1 }, { unique: true });
+saleSchema.index(
+  { tenantId: 1, idempotencyKey: 1 },
+  { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } },
+);
 
 export const SaleModel =
   (mongoose.models.Sale as mongoose.Model<ISale> | undefined) ??
@@ -377,6 +383,7 @@ export const PurchaseModel =
 export interface IDuePayment extends Document {
   _id: Types.ObjectId;
   tenantId: Types.ObjectId;
+  idempotencyKey?: string;
   partyType: 'customer' | 'supplier';
   partyName: string;
   partyPhone: string;
@@ -390,6 +397,7 @@ export interface IDuePayment extends Document {
 const duePaymentSchema = new Schema<IDuePayment>(
   {
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
+    idempotencyKey: { type: String, trim: true },
     partyType: { type: String, enum: ['customer', 'supplier'], required: true },
     partyName: { type: String, required: true },
     partyPhone: { type: String, default: '' },
@@ -399,6 +407,11 @@ const duePaymentSchema = new Schema<IDuePayment>(
     receivedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },
   { timestamps: { createdAt: true, updatedAt: false } },
+);
+
+duePaymentSchema.index(
+  { tenantId: 1, idempotencyKey: 1 },
+  { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } },
 );
 
 export const DuePaymentModel =

@@ -1,5 +1,11 @@
 name: Deploy (Vercel + Render Free)
 
+# Vercel Deployment Note (§4.3):
+# apps/web is deployed automatically via the Vercel GitHub Integration (Root Directory: apps/web,
+# Install Command: pnpm install --frozen-lockfile, Build Command: pnpm --filter @dokanos/shared build && pnpm build,
+# Output Directory: dist). No separate Vercel CLI token is required in GitHub Actions when the
+# Vercel GitHub app is connected to razikuljoni/DokanOS.
+
 on:
   push:
     branches: [main]
@@ -14,9 +20,14 @@ jobs:
         if: ${{ secrets.RENDER_DEPLOY_HOOK_URL != '' }}
         run: |
           curl -fsSL -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+          echo "Waiting 25s for Render free instance rollout..."
+          sleep 25
 
-      - name: Verify API /health & Frontend Availability
+      - name: Post-Deploy Smoke Check (API /health & Web 200)
         if: ${{ secrets.PUBLIC_API_URL != '' && secrets.PUBLIC_WEB_URL != '' }}
         run: |
-          curl -fsSL "${{ secrets.PUBLIC_API_URL }}/health" | grep -q '"ok":true'
-          curl -fsSL "${{ secrets.PUBLIC_WEB_URL }}" > /dev/null
+          echo "Checking API /health at ${{ secrets.PUBLIC_API_URL }}/health..."
+          curl -fsSL --retry 5 --retry-delay 10 "${{ secrets.PUBLIC_API_URL }}/health" | grep -q '"ok":true'
+          echo "Checking Web frontend at ${{ secrets.PUBLIC_WEB_URL }}..."
+          WEB_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.PUBLIC_WEB_URL }}")
+          test "$WEB_STATUS" = "200"

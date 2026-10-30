@@ -1,7 +1,7 @@
 {
   "name": "dokanos",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "packageManager": "pnpm@12.16.1",
   "workspaces": [
@@ -10,14 +10,14 @@
   ],
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "pnpm --filter @dokanos/shared build && pnpm --filter api build && vite build",
+    "build": "tsc -p packages/shared/tsconfig.json && tsc -p apps/api/tsconfig.json && vite build",
     "start": "node server.ts",
-    "seed": "pnpm --filter api seed",
+    "seed": "tsx apps/api/scripts/seed.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist apps/web/dist apps/api/dist packages/shared/dist",
     "lint": "eslint packages/shared/src apps/api/src apps/api/tests apps/api/scripts apps/web/src server.ts",
-    "typecheck": "pnpm -r typecheck && tsc --noEmit",
-    "test": "pnpm --filter api test",
+    "typecheck": "tsc -p packages/shared/tsconfig.json --noEmit && tsc -p apps/api/tsconfig.json --noEmit && tsc -p apps/web/tsconfig.json --noEmit && tsc --noEmit",
+    "test": "vitest run --dir apps/api --config apps/api/vitest.config.ts",
     "test:e2e": "playwright test",
     "format": "prettier --write ."
   },

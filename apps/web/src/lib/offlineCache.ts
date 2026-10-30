@@ -56,6 +56,7 @@ export interface CachedDuesSummary {
 }
 
 export interface OutboxPosSalePayload {
+  idempotencyKey: string;
   items: Array<{ productId: string; qty: number }>;
   discount: number;
   paymentMethod: PaymentMethod;
@@ -65,6 +66,7 @@ export interface OutboxPosSalePayload {
 }
 
 export interface OutboxDuePaymentPayload {
+  idempotencyKey: string;
   refId: string;
   amount: number;
   method: PaymentMethod;
@@ -74,6 +76,7 @@ export type OutboxItemStatus = 'pending' | 'syncing' | 'conflict' | 'failed';
 
 export interface OutboxItem {
   id: string;
+  idempotencyKey: string;
   tenantId: string;
   type: 'pos_sale' | 'due_payment';
   title: string;
@@ -87,7 +90,13 @@ export interface OutboxItem {
   duePaymentPayload?: OutboxDuePaymentPayload;
 }
 
-export type SnapshotResourceKey = 'pos-products' | 'dues-list' | 'dues-summary';
+export type SnapshotResourceKey =
+  | 'pos-products'
+  | 'dues-list'
+  | 'dues-summary'
+  | 'dashboard-summary'
+  | 'dashboard-trend'
+  | 'sales-list';
 
 interface SnapshotRecord<T = unknown> {
   key: string;

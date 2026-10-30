@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 440" width="960" height="440" role="img" aria-label="DokanOS Core Flow: POS Sale to Atomic Stock Decrement, Dashboard Update, and Low-Stock Alert">
+  <defs>
+    <style>
+      .paper { fill: #FAF7F2; }
+      .card { fill: #FFFFFF; stroke: #E7E0D4; stroke-width: 1.5; }
+      .header { fill: #1C1917; }
+      .ink { fill: #1C1917; font-family: 'Space Grotesk', system-ui, sans-serif; }
+      .body { fill: #57534E; font-family: 'Inter', system-ui, sans-serif; }
+      .mono { fill: #1C1917; font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
+      .green { fill: #14532D; }
+      .green-bg { fill: #14532D; }
+      .amber { fill: #B45309; }
+      .amber-box { fill: #FEF3C7; stroke: #F59E0B; stroke-width: 1; }
+      .pulse-1 { animation: stepOne 6s infinite; }
+      .pulse-2 { animation: stepTwo 6s infinite; }
+      .pulse-3 { animation: stepThree 6s infinite; }
+      @keyframes stepOne {
+        0%, 30% { opacity: 1; }
+        35%, 95% { opacity: 0.55; }
+        100% { opacity: 1; }
+      }
+      @keyframes stepTwo {
+        0%, 30% { opacity: 0.45; }
+        35%, 65% { opacity: 1; }
+        70%, 100% { opacity: 0.45; }
+      }
+      @keyframes stepThree {
+        0%, 65% { opacity: 0.35; }
+        70%, 95% { opacity: 1; }
+        100% { opacity: 0.35; }
+      }
+    </style>
+  </defs>
+
+  <!-- Background Warm Paper -->
+  <rect width="960" height="440" rx="8" class="paper" stroke="#E7E0D4" stroke-width="2" />
+
+  <!-- Top Ledger Bar -->
+  <rect x="0" y="0" width="960" height="48" rx="8" class="header" />
+  <text x="24" y="30" fill="#FAF7F2" font-family="Space Grotesk, sans-serif" font-size="16" font-weight="700">DokanOS · Rahim Pharmacy (Mirpur-10)</text>
+  <text x="730" y="29" fill="#A8A29E" font-family="JetBrains Mono, monospace" font-size="12">PRO PLAN · BDT (৳) · Asia/Dhaka</text>
+
+  <!-- Step 1: POS Counter Sale -->
+  <g class="pulse-1">
+    <rect x="24" y="70" width="288" height="344" rx="6" class="card" />
+    <text x="42" y="100" class="ink" font-size="15" font-weight="700">1. POS Counter Checkout</text>
+    <text x="42" y="120" class="body" font-size="11">Atomic Mongoose Replica-Set Transaction</text>
+
+    <rect x="42" y="138" width="252" height="54" rx="4" fill="#F3EFE6" />
+    <text x="54" y="159" class="ink" font-size="12" font-weight="600">Napa Extra 500mg (Box)</text>
+    <text x="54" y="177" class="mono" font-size="11">৳120 × 2 box · Stock: 6 → 4</text>
+    <text x="234" y="168" class="mono" font-size="13" font-weight="700">৳240</text>
+
+    <rect x="42" y="202" width="252" height="54" rx="4" fill="#F3EFE6" />
+    <text x="54" y="223" class="ink" font-size="12" font-weight="600">Sergel 20mg Capsule (Strip)</text>
+    <text x="54" y="241" class="mono" font-size="11">৳70 × 3 strip · Stock: 42 → 39</text>
+    <text x="234" y="232" class="mono" font-size="13" font-weight="700">৳210</text>
+
+    <line x1="42" y1="274" x2="294" y2="274" stroke="#E7E0D4" />
+    <text x="42" y="298" class="body" font-size="12">Grand Total (INV-0024)</text>
+    <text x="220" y="300" class="mono green" font-size="20" font-weight="700">৳450</text>
+    <text x="42" y="322" class="mono" font-size="11">Paid: ৳300 (CASH) · Baki Due: ৳150</text>
+
+    <rect x="42" y="352" width="252" height="40" rx="5" class="green-bg" />
+    <text x="86" y="377" fill="#FFFFFF" font-family="Space Grotesk, sans-serif" font-size="13" font-weight="600">Settle &amp; Print Receipt</text>
+  </g>
+
+  <!-- Step 2: Live Dashboard & Baki Ledger Update -->
+  <g class="pulse-2">
+    <rect x="336" y="70" width="288" height="344" rx="6" class="card" />
+    <text x="354" y="100" class="ink" font-size="15" font-weight="700">2. Live Ledger Aggregation</text>
+    <text x="354" y="120" class="body" font-size="11">Redis Cache Invalidated · Socket.io Push</text>
+
+    <rect x="354" y="138" width="120" height="72" rx="4" fill="#F3EFE6" />
+    <text x="366" y="158" class="body" font-size="11">30d Revenue</text>
+    <text x="366" y="188" class="mono" font-size="18" font-weight="700">৳68,870</text>
+
+    <rect x="486" y="138" width="120" height="72" rx="4" fill="#F3EFE6" />
+    <text x="498" y="158" class="body" font-size="11">Net COGS Profit</text>
+    <text x="498" y="188" class="mono green" font-size="18" font-weight="700">৳15,010</text>
+
+    <rect x="354" y="224" width="252" height="76" rx="4" fill="#F3EFE6" />
+    <text x="366" y="246" class="ink" font-size="12" font-weight="600">Customer Baki Receivable</text>
+    <text x="366" y="266" class="mono amber" font-size="16" font-weight="700">৳4,350 (+৳150 Baki)</text>
+    <text x="366" y="286" class="body" font-size="11">Ageing Bucket: 0–7 Days · Walk-in Customer</text>
+
+    <rect x="354" y="316" width="252" height="76" rx="4" fill="#F3EFE6" />
+    <text x="366" y="338" class="ink" font-size="12" font-weight="600">PWA Offline Outbox Ready</text>
+    <text x="366" y="358" class="mono" font-size="11">IndexedDB + X-Idempotency-Key</text>
+    <text x="366" y="376" class="body" font-size="11">Zero duplicate stock/due mutations</text>
+  </g>
+
+  <!-- Step 3: Low-Stock Alert & Sandbox Billing -->
+  <g class="pulse-3">
+    <rect x="648" y="70" width="288" height="344" rx="6" class="card" />
+    <text x="666" y="100" class="ink" font-size="15" font-weight="700">3. Real-Time Low-Stock Alert</text>
+    <text x="666" y="120" class="body" font-size="11">Socket.io stock:low + BullMQ Daily Digest</text>
+
+    <rect x="666" y="138" width="252" height="84" rx="4" class="amber-box" />
+    <text x="680" y="162" class="ink" font-size="12" font-weight="700">LOW STOCK THRESHOLD HIT</text>
+    <text x="680" y="182" class="mono amber" font-size="12" font-weight="600">Napa Extra 500mg: 4 box left</text>
+    <text x="680" y="202" class="body" font-size="11">Threshold: 10 box · Reorder from Square Pharma</text>
+
+    <rect x="666" y="238" width="252" height="154" rx="4" fill="#F3EFE6" />
+    <text x="680" y="262" class="ink" font-size="12" font-weight="700">SSLCommerz Sandbox Verified</text>
+    <text x="680" y="284" class="mono" font-size="11">Plan: DokanOS Pro (৳499 / 30d)</text>
+    <text x="680" y="304" class="mono" font-size="11">GET / POST Callback + IPN Guard</text>
+    <text x="680" y="324" class="mono green" font-size="11">Status: VALIDATED (Idempotent)</text>
+    <text x="680" y="348" class="body" font-size="11">100% Tenant-Scoped · RBAC Enforced</text>
+    <text x="680" y="368" class="mono" font-size="11">Vitest: 13/13 Passed · TypeScript Strict</text>
+  </g>
+</svg>

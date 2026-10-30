@@ -220,10 +220,10 @@ class SslCommerzBillingProvider implements BillingProvider {
       raw: { initiatedBy: user.email },
     });
 
-    // Attempt live sandbox call if reachable; fall back to local sandbox simulator redirect so demo works offline/in container
+    // Attempt live sandbox call when in production sandbox mode; fall back to local sandbox simulator redirect in development
     let gatewayUrl = `/app/billing?sandbox_checkout=sslcommerz&tran_id=${encodeURIComponent(tranId)}&amount=${PRO_PRICE_BDT}`;
 
-    if (env.NODE_ENV === 'production' && env.SSLCZ_STORE_ID !== 'testbox') {
+    if (env.NODE_ENV === 'production' && env.SSLCZ_SANDBOX) {
       try {
         const formData = new URLSearchParams({
           store_id: env.SSLCZ_STORE_ID,
@@ -237,7 +237,11 @@ class SslCommerzBillingProvider implements BillingProvider {
           ipn_url: env.SSLCZ_IPN_URL,
           cus_name: user.name,
           cus_email: user.email,
+          cus_add1: 'Mirpur-10, Dhaka',
+          cus_city: 'Dhaka',
+          cus_country: 'Bangladesh',
           cus_phone: '01700000000',
+          shipping_method: 'NO',
           product_name: 'DokanOS Pro (30 days)',
           product_category: 'Subscription',
           product_profile: 'non-physical-goods',
@@ -248,7 +252,7 @@ class SslCommerzBillingProvider implements BillingProvider {
           formData.toString(),
           {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            timeout: 5000,
+            timeout: 8000,
           },
         );
         if (resp.data?.GatewayPageURL) {
@@ -270,11 +274,15 @@ class SslCommerzBillingProvider implements BillingProvider {
   async handleWebhook(
     req: Request,
   ): Promise<{ processed: boolean; duplicate: boolean; tranId: string }> {
-    const body = req.body as Record<string, unknown>;
-    const tranId = String(body.tran_id ?? req.query.tran_id ?? '');
-    const valId = body.val_id ? String(body.val_id) : undefined;
-    const amount = body.amount !== undefined ? Number(body.amount) : undefined;
-    const currency = body.currency ? String(body.currency) : undefined;
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const query = (req.query ?? {}) as Record<string, unknown>;
+    const tranId = String(body.tran_id ?? query.tran_id ?? '');
+    const valIdRaw = body.val_id ?? query.val_id;
+    const valId = valIdRaw ? String(valIdRaw) : undefined;
+    const amountRaw = body.amount ?? query.amount;
+    const amount = amountRaw !== undefined ? Number(amountRaw) : undefined;
+    const currencyRaw = body.currency ?? query.currency;
+    const currency = currencyRaw ? String(currencyRaw) : undefined;
 
     if (!tranId) {
       throw AppError.badRequest('tran_id is required');
@@ -285,7 +293,7 @@ class SslCommerzBillingProvider implements BillingProvider {
       valId,
       amount,
       currency,
-      rawPayload: body,
+      rawPayload: Object.keys(body).length > 0 ? body : query,
     });
   }
 
@@ -435,19 +443,80 @@ const bkashStubProvider: BillingProvider = new BkashStubBillingProvider();
 
 export const billingRouter = Router();
 
-// Public SSLCommerz callbacks & IPN (do not require Bearer header because gateway redirects/POSTs directly)
-billingRouter.post('/sslcommerz/success', async (req, res, next) => {
+const frontendBaseUrl = (): string => env.FRONTEND_URL.replace(/\/$/, '');
+
+async function handleSslCommerzSuccess(
+  req: Request,
+  res: import('express').Response,
+  next: import('express').NextFunction,
+): Promise<void> {
   try {
     const result = await sslCommerzProvider.handleWebhook(req);
     if (req.headers.accept?.includes('application/json') || req.query.format === 'json') {
       res.status(200).json({ data: result });
       return;
     }
-    res.redirect(`/app/billing?status=success&tran_id=${encodeURIComponent(result.tranId)}`);
+    res.redirect(
+      `${frontendBaseUrl()}/app/billing?status=success&tran_id=${encodeURIComponent(result.tranId)}`,
+    );
   } catch (err) {
     next(err);
   }
-});
+}
+
+async function handleSslCommerzFail(
+  req: Request,
+  res: import('express').Response,
+  next: import('express').NextFunction,
+): Promise<void> {
+  try {
+    const tranId = String((req.body as { tran_id?: string })?.tran_id ?? req.query.tran_id ?? '');
+    if (tranId) {
+      await PaymentModel.updateOne(
+        { provider: 'sslcommerz', eventId: tranId, status: 'pending' },
+        { $set: { status: 'failed' } },
+      );
+    }
+    if (req.method === 'GET' && !req.headers.accept?.includes('application/json')) {
+      res.redirect(
+        `${frontendBaseUrl()}/app/billing?status=failed&tran_id=${encodeURIComponent(tranId)}`,
+      );
+      return;
+    }
+    res.status(200).json({ data: { status: 'failed', tranId } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function handleSslCommerzCancel(
+  req: Request,
+  res: import('express').Response,
+  next: import('express').NextFunction,
+): Promise<void> {
+  try {
+    const tranId = String((req.body as { tran_id?: string })?.tran_id ?? req.query.tran_id ?? '');
+    if (tranId) {
+      await PaymentModel.updateOne(
+        { provider: 'sslcommerz', eventId: tranId, status: 'pending' },
+        { $set: { status: 'failed' } },
+      );
+    }
+    if (req.method === 'GET' && !req.headers.accept?.includes('application/json')) {
+      res.redirect(
+        `${frontendBaseUrl()}/app/billing?status=cancelled&tran_id=${encodeURIComponent(tranId)}`,
+      );
+      return;
+    }
+    res.status(200).json({ data: { status: 'cancelled', tranId } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Public SSLCommerz callbacks & IPN (registered BEFORE requireAuth/requireTenant for both GET and POST)
+billingRouter.post('/sslcommerz/success', handleSslCommerzSuccess);
+billingRouter.get('/sslcommerz/success', handleSslCommerzSuccess);
 
 billingRouter.post('/sslcommerz/ipn', async (req, res, next) => {
   try {
@@ -458,35 +527,11 @@ billingRouter.post('/sslcommerz/ipn', async (req, res, next) => {
   }
 });
 
-billingRouter.post('/sslcommerz/fail', async (req, res, next) => {
-  try {
-    const tranId = String((req.body as { tran_id?: string })?.tran_id ?? req.query.tran_id ?? '');
-    if (tranId) {
-      await PaymentModel.updateOne(
-        { provider: 'sslcommerz', eventId: tranId, status: 'pending' },
-        { $set: { status: 'failed' } },
-      );
-    }
-    res.status(200).json({ data: { status: 'failed', tranId } });
-  } catch (err) {
-    next(err);
-  }
-});
+billingRouter.post('/sslcommerz/fail', handleSslCommerzFail);
+billingRouter.get('/sslcommerz/fail', handleSslCommerzFail);
 
-billingRouter.post('/sslcommerz/cancel', async (req, res, next) => {
-  try {
-    const tranId = String((req.body as { tran_id?: string })?.tran_id ?? req.query.tran_id ?? '');
-    if (tranId) {
-      await PaymentModel.updateOne(
-        { provider: 'sslcommerz', eventId: tranId, status: 'pending' },
-        { $set: { status: 'failed' } },
-      );
-    }
-    res.status(200).json({ data: { status: 'cancelled', tranId } });
-  } catch (err) {
-    next(err);
-  }
-});
+billingRouter.post('/sslcommerz/cancel', handleSslCommerzCancel);
+billingRouter.get('/sslcommerz/cancel', handleSslCommerzCancel);
 
 // Public Stripe webhook
 billingRouter.post('/stripe/webhook', async (req, res, next) => {

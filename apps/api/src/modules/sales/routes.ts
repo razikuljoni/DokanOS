@@ -34,6 +34,25 @@ salesRouter.post('/', requirePermission('sales:write'), async (req, res, next) =
     const tenantObjectId = new Types.ObjectId(req.tenant!.id);
     const soldByObjectId = new Types.ObjectId(req.user!.id);
 
+    const headerKey =
+      typeof req.headers['x-idempotency-key'] === 'string'
+        ? req.headers['x-idempotency-key'].trim()
+        : undefined;
+    const idempotencyKey = parsed.idempotencyKey || headerKey;
+
+    if (idempotencyKey) {
+      const existingSale = await SaleModel.findOne({
+        tenantId: tenantObjectId,
+        idempotencyKey,
+      })
+        .populate('soldBy', 'name role')
+        .lean();
+      if (existingSale) {
+        res.status(200).json({ data: existingSale, duplicate: true });
+        return;
+      }
+    }
+
     let createdSaleId: Types.ObjectId | null = null;
     const lowStockAlerts: Array<{ productId: string; name: string; stock: number }> = [];
 
@@ -154,6 +173,7 @@ salesRouter.post('/', requirePermission('sales:write'), async (req, res, next) =
               _id: saleId,
               tenantId: tenantObjectId,
               invoiceNo,
+              ...(idempotencyKey ? { idempotencyKey } : {}),
               items: saleItems,
               subtotal,
               discount,

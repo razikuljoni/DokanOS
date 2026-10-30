@@ -203,6 +203,9 @@ export function BillingPage(): React.ReactElement {
     enabled: Boolean(tenant?.id),
   });
 
+  const callbackStatus = searchParams.get('status');
+  const callbackTranId = searchParams.get('tran_id');
+
   const initSslCommerzMutation = useMutation({
     mutationFn: async () => {
       return apiFetch<{
@@ -213,6 +216,10 @@ export function BillingPage(): React.ReactElement {
       });
     },
     onSuccess: (res) => {
+      if (res.data.GatewayPageURL.startsWith('http')) {
+        window.location.assign(res.data.GatewayPageURL);
+        return;
+      }
       setCardNumber('4111111111111111');
       setSandboxModal({
         provider: 'sslcommerz',
@@ -232,11 +239,37 @@ export function BillingPage(): React.ReactElement {
       });
     },
     onSuccess: (res) => {
+      if (res.data.checkoutUrl.startsWith('http')) {
+        window.location.assign(res.data.checkoutUrl);
+        return;
+      }
       setCardNumber('4242424242424242');
       setSandboxModal({
         provider: 'stripe',
         tranId: res.data.tranId,
         amount: res.data.amount,
+      });
+    },
+  });
+
+  const cancelPlanMutation = useMutation({
+    mutationFn: async (immediate: boolean) => {
+      return apiFetch('/api/v1/billing/cancel', {
+        method: 'POST',
+        body: JSON.stringify({ immediate }),
+      });
+    },
+    onSuccess: (_, immediate) => {
+      if (immediate) {
+        updateTenant({ plan: 'free', planExpiresAt: null });
+      }
+      void queryClient.invalidateQueries({ queryKey: ['billing', tenant?.id] });
+      addToast({
+        title: immediate ? 'Switched to Free Plan' : 'Subscription Renewal Cancelled',
+        description: immediate
+          ? 'Your shop is now on the Free plan.'
+          : 'Your Pro plan remains active until the end of the current 30-day period.',
+        variant: 'warning',
       });
     },
   });
@@ -361,12 +394,35 @@ export function BillingPage(): React.ReactElement {
             Subscription & Billing Portal
           </h1>
           <p className="text-xs text-muted-foreground">
-            SSLCommerz Sandbox (Primary BDT Gateway) and Stripe TEST MODE with idempotent webhook
+            SSLCommerz SANDBOX (Primary BDT Gateway) and Stripe TEST MODE with idempotent webhook
             validation.
           </p>
         </div>
         {billing && <PlanBadge plan={billing.plan} />}
       </div>
+
+      {callbackStatus && (
+        <div
+          className={`rounded-md border px-4 py-3 flex items-center justify-between gap-3 text-xs ${
+            callbackStatus === 'success'
+              ? 'border-primary bg-primary/10 text-primary'
+              : 'border-warning bg-warning/15 text-warning'
+          }`}
+        >
+          <span>
+            {callbackStatus === 'success'
+              ? `Payment verified via SSLCommerz Sandbox (${callbackTranId ?? 'N/A'}) — DokanOS Pro is active for 30 days.`
+              : `Gateway checkout ${callbackStatus} (${callbackTranId ?? 'N/A'}). No charges were applied.`}
+          </span>
+          <button
+            type="button"
+            onClick={() => setSearchParams({})}
+            className="underline font-medium cursor-pointer"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Current Plan & Usage Meters */}
@@ -442,11 +498,15 @@ export function BillingPage(): React.ReactElement {
           </Card>
         </div>
 
-        {/* Gateway Checkout Actions */}
+        {/* Gateway Checkout Actions & Plan Management */}
         <div className="lg:col-span-6">
           <Card className="h-full flex flex-col justify-between">
             <CardHeader>
-              <CardTitle>Upgrade or Extend Pro (30 Days — ৳499)</CardTitle>
+              <CardTitle>
+                {billing?.plan === 'pro'
+                  ? 'Manage Pro Plan · Extend 30 Days (৳499)'
+                  : 'Upgrade to DokanOS Pro (30 Days — ৳499)'}
+              </CardTitle>
               <CardDescription>
                 Local Bangladeshi gateways use one-off 30-day payments. Every callback is verified
                 server-side and deduplicated on <code>{'{ provider, eventId }'}</code>.
@@ -460,7 +520,9 @@ export function BillingPage(): React.ReactElement {
               >
                 <span className="flex items-center gap-2">
                   <CreditCard className="h-4 w-4" />
-                  Pay ৳499 via SSLCommerz (Sandbox Primary)
+                  {billing?.plan === 'pro'
+                    ? 'Extend +30 Days via SSLCommerz (SANDBOX)'
+                    : 'Upgrade ৳499 via SSLCommerz (SANDBOX)'}
                 </span>
                 <span className="font-mono text-xs">Test Visa 4111...</span>
               </Button>
@@ -473,20 +535,36 @@ export function BillingPage(): React.ReactElement {
               >
                 <span className="flex items-center gap-2">
                   <CreditCard className="h-4 w-4" />
-                  Pay ৳499 via Stripe Checkout (TEST MODE)
+                  {billing?.plan === 'pro'
+                    ? 'Extend +30 Days via Stripe (TEST MODE)'
+                    : 'Upgrade ৳499 via Stripe Checkout (TEST MODE)'}
                 </span>
                 <span className="font-mono text-xs">Test Card 4242...</span>
               </Button>
 
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full text-xs text-muted-foreground"
-                onClick={() => bkashStubMutation.mutate()}
-              >
-                <AlertTriangle className="h-3.5 w-3.5" />
-                Test bKash Tokenized Provider Seam (501 Stub)
-              </Button>
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs text-muted-foreground"
+                  onClick={() => bkashStubMutation.mutate()}
+                >
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  Test bKash Tokenized Seam (501 Stub)
+                </Button>
+
+                {billing?.plan === 'pro' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs"
+                    disabled={cancelPlanMutation.isPending}
+                    onClick={() => cancelPlanMutation.mutate(true)}
+                  >
+                    Switch to Free Plan (Demo Toggle)
+                  </Button>
+                )}
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -511,11 +589,14 @@ export function BillingPage(): React.ReactElement {
               <div>
                 <h3 className="font-display text-lg font-bold">
                   {sandboxModal.provider === 'sslcommerz'
-                    ? 'SSLCommerz Sandbox Gateway'
+                    ? 'SSLCommerz SANDBOX Gateway'
                     : 'Stripe Checkout (TEST MODE)'}
                 </h3>
                 <p className="text-xs font-mono text-muted-foreground">
                   tran_id: {sandboxModal.tranId}
+                </p>
+                <p className="text-[11px] font-mono text-warning mt-1">
+                  Sandbox simulator — no real gateway call in development
                 </p>
               </div>
               <button

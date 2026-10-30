@@ -184,15 +184,16 @@ export function PosPage(): React.ReactElement {
     }
 
     const now = new Date();
-    const ymd = now.toISOString().slice(0, 10).replace(/-/g, '');
-    const suffix = String(now.getTime()).slice(-4);
-    const tempInvoiceNo = `OFF-${ymd}-${suffix}`;
+    const idempotencyKey = `idem-sale-${tenant.id}-${now.getTime()}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
+    const pendingInvoiceLabel = 'Pending sync — invoice number assigned on sync';
     const paymentStatus =
       bakiDueAmount === 0 ? 'paid' : paidAmountNum === 0 ? 'due' : 'partial';
 
     const offlineSale: CompletedSale = {
       _id: `offline-sale-${now.getTime()}`,
-      invoiceNo: tempInvoiceNo,
+      invoiceNo: pendingInvoiceLabel,
       items: cart.map((line) => ({
         name: line.product.name,
         qty: line.qty,
@@ -220,9 +221,10 @@ export function PosPage(): React.ReactElement {
 
     await enqueueOutboxItem({
       id: offlineSale._id,
+      idempotencyKey,
       tenantId: tenant.id,
       type: 'pos_sale',
-      title: `POS Sale ${tempInvoiceNo}`,
+      title: 'POS Sale (Pending Sync)',
       subtitle: `${cart.reduce((s, l) => s + l.qty, 0)} unit(s) · ${
         offlineSale.customerName
       }${bakiDueAmount > 0 ? ` · Baki ${formatBDT(bakiDueAmount)}` : ''}`,
@@ -230,6 +232,7 @@ export function PosPage(): React.ReactElement {
       createdAt: now.toISOString(),
       status: 'pending',
       salePayload: {
+        idempotencyKey,
         items: cart.map((line) => ({
           productId: line.product._id,
           qty: line.qty,
@@ -656,12 +659,15 @@ export function PosPage(): React.ReactElement {
               <div>
                 <div className="font-display text-lg font-bold">{tenant?.name}</div>
                 <div className="text-xs text-muted-foreground">
-                  Invoice {lastReceipt.invoiceNo} · {formatDateDhaka(lastReceipt.createdAt)}
+                  {lastReceipt.isOfflineQueued
+                    ? lastReceipt.invoiceNo
+                    : `Invoice ${lastReceipt.invoiceNo}`}{' '}
+                  · {formatDateDhaka(lastReceipt.createdAt)}
                 </div>
                 {lastReceipt.isOfflineQueued && (
                   <div className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded bg-warning/15 text-warning text-[11px] font-mono">
                     <CloudOff className="h-3 w-3" />
-                    Queued Offline — Will sync on reconnect
+                    Pending sync — invoice number assigned on sync
                   </div>
                 )}
               </div>
