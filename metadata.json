@@ -1,0 +1,6 @@
+{
+  "name": "DokanOS",
+  "description": "Multi-tenant inventory, POS sales, and Baki dues ledger SaaS for Bangladeshi retail shops.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

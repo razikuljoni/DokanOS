@@ -1,0 +1,40 @@
+{
+  "name": "web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5173",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@dokanos/shared": "workspace:*",
+    "@hookform/resolvers": "^4.1.3",
+    "@tailwindcss/vite": "^4.1.0",
+    "@tanstack/react-query": "^5.69.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.546.0",
+    "motion": "^12.23.24",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1",
+    "react-hook-form": "^7.54.2",
+    "react-router": "^7.4.0",
+    "recharts": "^2.15.1",
+    "socket.io-client": "^4.8.1",
+    "tailwind-merge": "^3.0.2",
+    "zod": "^3.24.2",
+    "zustand": "^5.0.3"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "@vitejs/plugin-react": "^4.3.4",
+    "tailwindcss": "^4.1.0",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.3"
+  }
+}

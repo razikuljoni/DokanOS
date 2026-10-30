@@ -1,0 +1,22 @@
+name: Deploy (Vercel + Render Free)
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Trigger Render Deploy Hook & Smoke Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger Render Free Web Service Deploy Hook
+        if: ${{ secrets.RENDER_DEPLOY_HOOK_URL != '' }}
+        run: |
+          curl -fsSL -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+
+      - name: Verify API /health & Frontend Availability
+        if: ${{ secrets.PUBLIC_API_URL != '' && secrets.PUBLIC_WEB_URL != '' }}
+        run: |
+          curl -fsSL "${{ secrets.PUBLIC_API_URL }}/health" | grep -q '"ok":true'
+          curl -fsSL "${{ secrets.PUBLIC_WEB_URL }}" > /dev/null

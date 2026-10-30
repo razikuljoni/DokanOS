@@ -1,0 +1,36 @@
+name: E2E Smoke Tests (Chromium)
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  e2e:
+    name: Playwright Chromium Smoke Suite
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js 20 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright Smoke Tests
+        env:
+          PLAYWRIGHT_BASE_URL: ${{ secrets.PREVIEW_URL || 'http://localhost:3000' }}
+        run: pnpm test:e2e

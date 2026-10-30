@@ -1,0 +1,68 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: dokanos-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    healthcheck:
+      test: >
+        mongosh --quiet --eval "try { rs.status().ok } catch (e) { rs.initiate({_id:'rs0',members:[{_id:0,host:'localhost:27017'}]}).ok }"
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  redis:
+    image: redis:7-alpine
+    container_name: dokanos-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: dokanos-api
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    env_file:
+      - ./apps/api/.env
+    environment:
+      PORT: 4000
+      MONGODB_URI: mongodb://mongo:27017/dokanos?replicaSet=rs0
+      UPSTASH_REDIS_URL: redis://redis:6379
+      FRONTEND_URL: http://localhost:5173
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    image: node:20-alpine
+    container_name: dokanos-web
+    working_dir: /app
+    command: sh -c "corepack enable && pnpm --filter web dev --host 0.0.0.0"
+    ports:
+      - "5173:5173"
+    volumes:
+      - .:/app
+    environment:
+      VITE_API_URL: http://localhost:4000
+      VITE_SOCKET_URL: http://localhost:4000
+    depends_on:
+      - api
+
+volumes:
+  mongo_data:
