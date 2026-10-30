@@ -5,9 +5,11 @@ export default tseslint.config(
   {
     ignores: [
       '**/dist/**',
+      '**/dev-dist/**',
       '**/node_modules/**',
       '**/coverage/**',
       'public/**',
+      '.agents/**',
     ],
   },
   js.configs.recommended,

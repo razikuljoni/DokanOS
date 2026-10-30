@@ -6,7 +6,7 @@ This guide walks through deploying **DokanOS** end-to-end on **100% free tiers**
 
 ## Pre-Flight Release Checklist (Phase 6 Verification)
 
-- [x] **Lockfile & Package Manager:** Single `pnpm-lock.yaml` at repo root (`packageManager: "pnpm@12.16.1"`), no `bun.lock` or `package-lock.json`; `pnpm install --frozen-lockfile` succeeds.
+- [x] **Lockfile & Package Manager:** Single `pnpm-lock.yaml` at repo root (`packageManager: "pnpm@10.34.5"`), no `bun.lock` or `package-lock.json`; `pnpm install --frozen-lockfile` succeeds.
 - [x] **Static Checks & Tests:** `pnpm lint`, `pnpm typecheck`, `pnpm --filter api test` (13/13 passing tests across 2 suites), and `pnpm build` all pass with zero errors.
 - [x] **Multi-Tenant Isolation:** Every Mongoose query and IndexedDB cache key is scoped by `tenantId`; spoofed `X-Tenant-Id` headers return `403 TENANT_MISMATCH`.
 - [x] **Auth Security:** `15m` JWT access tokens live in memory only (never `localStorage`/`sessionStorage`); `30d` refresh tokens are stored as `SHA-256` hashes in MongoDB and rotated via `httpOnly` cookie `dokanos_rt` with family reuse detection.
@@ -106,16 +106,16 @@ This guide walks through deploying **DokanOS** end-to-end on **100% free tiers**
 | `JWT_ACCESS_SECRET` | Yes | *(64-char random hex)* | Secret used to sign and verify 15-minute `HS256` access tokens. |
 | `REFRESH_TOKEN_SECRET` | Yes | *(64-char random hex)* | Secret for refresh token signing context. |
 | `COOKIE_SECRET` | Yes | *(64-char random hex)* | Secret passed to `cookie-parser`. |
-| `FRONTEND_URL` | Yes | `https://dokanos-web.vercel.app` | Allowed CORS origin and redirect target after SSLCommerz payment callbacks. |
+| `FRONTEND_URL` | Yes | `https://dokanos.onrender.com` | Allowed CORS origin and redirect target after SSLCommerz payment callbacks. |
 | `UPSTASH_REDIS_URL` | Optional | `rediss://default:...@...upstash.io:6379` | Redis connection URL for 60s dashboard cache-aside and BullMQ worker. |
 | `RESEND_API_KEY` | Optional | `re_xxxxxxxxx` | Resend API key for low-stock and weekly digest emails (logs to stdout if placeholder). |
 | `SSLCZ_STORE_ID` | Yes | `testbox` | SSLCommerz Sandbox Store ID (`testbox` or registered developer sandbox store). |
 | `SSLCZ_STORE_PASSWD` | Yes | `qwerty` | SSLCommerz Sandbox Store Password (`qwerty` or registered sandbox password). |
 | `SSLCZ_SANDBOX` | Yes | `true` | Must remain `true` so only SSLCommerz Sandbox endpoints are called. |
-| `SSLCZ_SUCCESS_URL` | Yes | `https://dokanos-api.onrender.com/api/v1/billing/sslcommerz/success` | Public callback URL where SSLCommerz redirects/POSTs on successful payment. |
-| `SSLCZ_FAIL_URL` | Yes | `https://dokanos-api.onrender.com/api/v1/billing/sslcommerz/fail` | Public callback URL for failed checkout attempts. |
-| `SSLCZ_CANCEL_URL` | Yes | `https://dokanos-api.onrender.com/api/v1/billing/sslcommerz/cancel` | Public callback URL when a user cancels checkout. |
-| `SSLCZ_IPN_URL` | Yes | `https://dokanos-api.onrender.com/api/v1/billing/sslcommerz/ipn` | Server-to-server Instant Payment Notification (IPN) endpoint. |
+| `SSLCZ_SUCCESS_URL` | Yes | `https://dokanos.onrender.com/api/v1/billing/sslcommerz/success` | Public callback URL where SSLCommerz redirects/POSTs on successful payment. |
+| `SSLCZ_FAIL_URL` | Yes | `https://dokanos.onrender.com/api/v1/billing/sslcommerz/fail` | Public callback URL for failed checkout attempts. |
+| `SSLCZ_CANCEL_URL` | Yes | `https://dokanos.onrender.com/api/v1/billing/sslcommerz/cancel` | Public callback URL when a user cancels checkout. |
+| `SSLCZ_IPN_URL` | Yes | `https://dokanos.onrender.com/api/v1/billing/sslcommerz/ipn` | Server-to-server Instant Payment Notification (IPN) endpoint. |
 | `STRIPE_SECRET_KEY` | Optional | `sk_test_...` | Stripe test mode secret key for secondary card checkout. |
 | `STRIPE_WEBHOOK_SECRET` | Optional | `whsec_...` | Stripe webhook signing secret for `/api/v1/billing/stripe/webhook`. |
 | `SEED_DEMO` | Optional | `true` | Seeds **Rahim Pharmacy** demo data automatically if the database is empty. |
@@ -124,6 +124,6 @@ This guide walks through deploying **DokanOS** end-to-end on **100% free tiers**
 
 | Variable | Required | Example / Default | Description |
 | :--- | :--- | :--- | :--- |
-| `VITE_API_URL` | Yes (Prod) | `https://dokanos-api.onrender.com` | Base URL for `/api/v1/*` requests (leave empty in local Vite proxy dev). |
-| `VITE_SOCKET_URL` | Yes (Prod) | `https://dokanos-api.onrender.com` | Base URL for Socket.io realtime connection. |
+| `VITE_API_URL` | Yes (Prod) | `https://dokanos.onrender.com` | Base URL for `/api/v1/*` requests (leave empty in local Vite proxy dev). |
+| `VITE_SOCKET_URL` | Yes (Prod) | `https://dokanos.onrender.com` | Base URL for Socket.io realtime connection. |
 | `VITE_STRIPE_PUBLISHABLE_KEY` | Optional | `pk_test_...` | Stripe test mode publishable key. |
