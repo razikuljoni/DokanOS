@@ -10,11 +10,20 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { Banknote, Search, X } from 'lucide-react';
+import { Banknote, CloudOff, Database, Search, X } from 'lucide-react';
 import { PAYMENT_METHODS, type PaymentMethod } from '@dokanos/shared';
 import { useAuthStore } from '@/stores/authStore';
 import { useUiStore } from '@/stores/uiStore';
-import { apiFetch } from '@/lib/api';
+import { useIsOffline, useOfflineStore } from '@/stores/offlineStore';
+import { apiFetch, ApiClientError } from '@/lib/api';
+import {
+  applyOfflineDuePaymentToSnapshots,
+  enqueueOutboxItem,
+  getTenantSnapshot,
+  saveTenantSnapshot,
+  type CachedDuesSummary,
+  type CachedUnifiedDueItem,
+} from '@/lib/offlineCache';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -26,35 +35,35 @@ import {
 } from '@/components/SharedWidgets';
 import { formatBDT, formatDateDhaka } from '@/lib/utils';
 
-interface UnifiedDueItem {
-  refId: string;
-  refNo: string;
-  partyType: 'customer' | 'supplier';
-  partyName: string;
-  partyPhone: string;
-  totalAmount: number;
-  paidAmount: number;
-  dueAmount: number;
-  ageDays: number;
-  ageingBucket: '0-7' | '8-30' | '30+';
-  createdAt: string;
-}
+type UnifiedDueItem = CachedUnifiedDueItem;
+type DuesSummary = CachedDuesSummary;
 
-interface DuesSummary {
-  totalReceivable: number;
-  totalPayable: number;
-  netPosition: number;
-  customerCount: number;
-  supplierCount: number;
-  buckets: Record<
-    '0-7' | '8-30' | '30+',
-    { receivable: number; payable: number; count: number }
-  >;
+function filterCachedDues(
+  items: UnifiedDueItem[],
+  partyFilter: 'all' | 'customer' | 'supplier',
+  bucketFilter: 'all' | '0-7' | '8-30' | '30+',
+  search: string,
+): UnifiedDueItem[] {
+  const q = search.trim().toLowerCase();
+  return items.filter((item) => {
+    if (partyFilter !== 'all' && item.partyType !== partyFilter) return false;
+    if (bucketFilter !== 'all' && item.ageingBucket !== bucketFilter) return false;
+    if (!q) return true;
+    return (
+      item.partyName.toLowerCase().includes(q) ||
+      item.partyPhone.toLowerCase().includes(q) ||
+      item.refNo.toLowerCase().includes(q)
+    );
+  });
 }
 
 export function DuesPage(): React.ReactElement {
   const tenant = useAuthStore((s) => s.tenant);
   const addToast = useUiStore((s) => s.addToast);
+  const isOffline = useIsOffline();
+  const refreshOfflineState = useOfflineStore((s) => s.refreshOfflineState);
+  const setDrawerOpen = useOfflineStore((s) => s.setDrawerOpen);
+  const outboxCount = useOfflineStore((s) => s.outboxItems.length);
   const queryClient = useQueryClient();
 
   const [partyFilter, setPartyFilter] = useState<'all' | 'customer' | 'supplier'>('all');
@@ -65,47 +74,173 @@ export function DuesPage(): React.ReactElement {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
 
   const { data: summaryRes, isLoading: summaryLoading } = useQuery({
-    queryKey: ['dues', tenant?.id, 'summary'],
-    queryFn: () => apiFetch<{ data: DuesSummary }>('/api/v1/dues/summary'),
+    queryKey: ['dues', tenant?.id, 'summary', isOffline ? 'offline' : 'online'],
+    queryFn: async (): Promise<{ data: DuesSummary; fromCache?: boolean }> => {
+      if (!tenant?.id) {
+        return {
+          data: {
+            totalReceivable: 0,
+            totalPayable: 0,
+            netPosition: 0,
+            customerCount: 0,
+            supplierCount: 0,
+            buckets: {
+              '0-7': { receivable: 0, payable: 0, count: 0 },
+              '8-30': { receivable: 0, payable: 0, count: 0 },
+              '30+': { receivable: 0, payable: 0, count: 0 },
+            },
+          },
+        };
+      }
+
+      if (isOffline) {
+        const snap = await getTenantSnapshot<DuesSummary>(tenant.id, 'dues-summary');
+        if (snap) return { data: snap.data, fromCache: true };
+      }
+
+      try {
+        const res = await apiFetch<{ data: DuesSummary }>('/api/v1/dues/summary');
+        await saveTenantSnapshot(tenant.id, 'dues-summary', res.data);
+        return { data: res.data, fromCache: false };
+      } catch (err) {
+        if (!(err instanceof ApiClientError)) {
+          const snap = await getTenantSnapshot<DuesSummary>(tenant.id, 'dues-summary');
+          if (snap) return { data: snap.data, fromCache: true };
+        }
+        throw err;
+      }
+    },
     enabled: Boolean(tenant?.id),
   });
 
   const { data: duesRes, isLoading: duesLoading } = useQuery({
-    queryKey: ['dues', tenant?.id, { partyFilter, bucketFilter, search }],
-    queryFn: () => {
-      const params = new URLSearchParams();
-      if (partyFilter !== 'all') params.set('partyType', partyFilter);
-      if (bucketFilter !== 'all') params.set('bucket', bucketFilter);
-      if (search.trim()) params.set('search', search.trim());
-      return apiFetch<{ data: UnifiedDueItem[] }>(`/api/v1/dues?${params.toString()}`);
+    queryKey: [
+      'dues',
+      tenant?.id,
+      { partyFilter, bucketFilter, search, mode: isOffline ? 'offline' : 'online' },
+    ],
+    queryFn: async (): Promise<{ data: UnifiedDueItem[]; fromCache?: boolean }> => {
+      if (!tenant?.id) return { data: [] };
+
+      if (isOffline) {
+        const snap = await getTenantSnapshot<UnifiedDueItem[]>(tenant.id, 'dues-list');
+        return {
+          data: filterCachedDues(snap?.data ?? [], partyFilter, bucketFilter, search),
+          fromCache: true,
+        };
+      }
+
+      try {
+        const params = new URLSearchParams();
+        if (partyFilter !== 'all') params.set('partyType', partyFilter);
+        if (bucketFilter !== 'all') params.set('bucket', bucketFilter);
+        if (search.trim()) params.set('search', search.trim());
+        const res = await apiFetch<{ data: UnifiedDueItem[] }>(
+          `/api/v1/dues?${params.toString()}`,
+        );
+
+        // When loading unfiltered ledger, persist full snapshot to IndexedDB for offline access
+        if (partyFilter === 'all' && bucketFilter === 'all' && !search.trim()) {
+          await saveTenantSnapshot(tenant.id, 'dues-list', res.data);
+          await refreshOfflineState(tenant.id);
+        }
+        return { data: res.data, fromCache: false };
+      } catch (err) {
+        if (!(err instanceof ApiClientError)) {
+          const snap = await getTenantSnapshot<UnifiedDueItem[]>(tenant.id, 'dues-list');
+          if (snap) {
+            return {
+              data: filterCachedDues(snap.data, partyFilter, bucketFilter, search),
+              fromCache: true,
+            };
+          }
+        }
+        throw err;
+      }
     },
     enabled: Boolean(tenant?.id),
   });
 
+  const queueOfflineDuePayment = async (): Promise<{ queuedOffline: boolean }> => {
+    if (!tenant?.id || !paymentTarget) {
+      throw new Error('Missing payment target');
+    }
+
+    const rawAmt = Number(paymentAmount);
+    const { appliedAmount } = await applyOfflineDuePaymentToSnapshots(
+      tenant.id,
+      paymentTarget,
+      rawAmt,
+    );
+
+    const nowIso = new Date().toISOString();
+    await enqueueOutboxItem({
+      id: `offline-due-${Date.now()}`,
+      tenantId: tenant.id,
+      type: 'due_payment',
+      title: `Baki Payment (${paymentTarget.refNo})`,
+      subtitle: `${paymentTarget.partyName} · ${paymentMethod.toUpperCase()}`,
+      amount: appliedAmount,
+      createdAt: nowIso,
+      status: 'pending',
+      duePaymentPayload: {
+        refId: paymentTarget.refId,
+        amount: appliedAmount,
+        method: paymentMethod,
+      },
+    });
+
+    await refreshOfflineState(tenant.id);
+    return { queuedOffline: true };
+  };
+
   const recordPaymentMutation = useMutation({
-    mutationFn: async () => {
-      if (!paymentTarget) return;
-      return apiFetch(`/api/v1/dues/${paymentTarget.refId}/payments`, {
-        method: 'POST',
-        body: JSON.stringify({
-          amount: Number(paymentAmount),
-          method: paymentMethod,
-        }),
-      });
+    mutationFn: async (): Promise<{ queuedOffline: boolean }> => {
+      if (!paymentTarget) return { queuedOffline: false };
+
+      if (isOffline) {
+        return queueOfflineDuePayment();
+      }
+
+      try {
+        await apiFetch(`/api/v1/dues/${paymentTarget.refId}/payments`, {
+          method: 'POST',
+          body: JSON.stringify({
+            amount: Number(paymentAmount),
+            method: paymentMethod,
+          }),
+        });
+        return { queuedOffline: false };
+      } catch (err) {
+        if (!(err instanceof ApiClientError)) {
+          return queueOfflineDuePayment();
+        }
+        throw err;
+      }
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       setPaymentTarget(null);
       setPaymentAmount('');
       void queryClient.invalidateQueries({ queryKey: ['dues', tenant?.id] });
-      void queryClient.invalidateQueries({ queryKey: ['dashboard', tenant?.id] });
-      void queryClient.invalidateQueries({ queryKey: ['sales', tenant?.id] });
-      void queryClient.invalidateQueries({ queryKey: ['purchases', tenant?.id] });
-      void queryClient.invalidateQueries({ queryKey: ['suppliers', tenant?.id] });
-      addToast({
-        title: 'Baki Payment Recorded',
-        description: 'Outstanding balance updated in an atomic transaction.',
-        variant: 'success',
-      });
+
+      if (!result.queuedOffline) {
+        void queryClient.invalidateQueries({ queryKey: ['dashboard', tenant?.id] });
+        void queryClient.invalidateQueries({ queryKey: ['sales', tenant?.id] });
+        void queryClient.invalidateQueries({ queryKey: ['purchases', tenant?.id] });
+        void queryClient.invalidateQueries({ queryKey: ['suppliers', tenant?.id] });
+        addToast({
+          title: 'Baki Payment Recorded',
+          description: 'Outstanding balance updated in an atomic transaction.',
+          variant: 'success',
+        });
+      } else {
+        addToast({
+          title: 'Offline Baki Payment Queued',
+          description:
+            'Local Baki balance updated immediately and queued in Outbox for MongoDB sync.',
+          variant: 'warning',
+        });
+      }
     },
     onError: (err) => {
       addToast({
@@ -141,7 +276,16 @@ export function DuesPage(): React.ReactElement {
     {
       key: 'refNo',
       header: 'Reference',
-      render: (row) => <span className="font-mono text-xs font-semibold">{row.refNo}</span>,
+      render: (row) => (
+        <div className="flex items-center gap-1.5">
+          <span className="font-mono text-xs font-semibold">{row.refNo}</span>
+          {row.isOfflineQueued && (
+            <span className="px-1.5 py-0.5 rounded bg-warning/15 text-warning text-[10px] font-mono">
+              Offline
+            </span>
+          )}
+        </div>
+      ),
     },
     {
       key: 'party',
@@ -230,14 +374,31 @@ export function DuesPage(): React.ReactElement {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-2xl font-bold tracking-tight">
-          Baki (Credit & Dues) Ledger
-        </h1>
-        <p className="text-xs text-muted-foreground">
-          Unified customer receivables and supplier payables with 0–7, 8–30, and 30+ day ageing
-          analysis.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div>
+          <h1 className="font-display text-2xl font-bold tracking-tight">
+            Baki (Credit &amp; Dues) Ledger
+          </h1>
+          <p className="text-xs text-muted-foreground">
+            Unified customer receivables and supplier payables with 0–7, 8–30, and 30+ day ageing
+            analysis. Remains functional offline via local IndexedDB cache.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {(isOffline || duesRes?.fromCache) && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-warning/40 bg-warning/15 text-warning text-xs font-medium">
+              <CloudOff className="h-3.5 w-3.5" />
+              Local Baki Cache Active
+            </span>
+          )}
+          {outboxCount > 0 && (
+            <Button variant="outline" size="sm" onClick={() => setDrawerOpen(true)}>
+              <Database className="h-3.5 w-3.5 text-primary" />
+              Outbox ({outboxCount})
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* 3 KPI Stat Cards */}
@@ -380,6 +541,12 @@ export function DuesPage(): React.ReactElement {
                   {formatBDT(paymentTarget.dueAmount)}
                 </strong>
               </div>
+              {isOffline && (
+                <div className="pt-1 text-warning font-medium">
+                  Offline Mode: Payment will update local Baki balance immediately and queue in
+                  Outbox.
+                </div>
+              )}
             </div>
 
             <div className="space-y-3">
@@ -426,7 +593,11 @@ export function DuesPage(): React.ReactElement {
                 disabled={recordPaymentMutation.isPending || Number(paymentAmount) <= 0}
                 onClick={() => recordPaymentMutation.mutate()}
               >
-                {recordPaymentMutation.isPending ? 'Recording...' : 'Confirm Payment'}
+                {recordPaymentMutation.isPending
+                  ? 'Recording...'
+                  : isOffline
+                    ? 'Queue Offline Payment'
+                    : 'Confirm Payment'}
               </Button>
             </div>
           </div>

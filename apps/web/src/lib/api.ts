@@ -46,7 +46,10 @@ export async function tryRefreshSession(): Promise<string | null> {
       useAuthStore.getState().setAuth(data);
       return data.accessToken;
     } catch {
-      useAuthStore.getState().clearAuth();
+      // Do not wipe in-memory user/tenant during a temporary retail shop network outage
+      if (!useAuthStore.getState().user) {
+        useAuthStore.getState().clearAuth();
+      }
       return null;
     } finally {
       refreshPromise = null;

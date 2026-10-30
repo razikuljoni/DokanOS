@@ -31,6 +31,11 @@ import { useSocket } from '@/lib/useSocket';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PlanBadge } from '@/components/SharedWidgets';
+import { PWAInstallButton } from '@/lib/usePWAInstall';
+import {
+  OfflineBannerAndDrawer,
+  OfflineSyncHeaderControls,
+} from '@/components/OfflineSyncManager';
 import { cn } from '@/lib/utils';
 
 interface NavItem {
@@ -279,7 +284,9 @@ export function AppShell(): React.ReactElement {
             />
           </form>
 
-          <div className="flex items-center gap-4 shrink-0">
+          <div className="flex items-center gap-2.5 shrink-0">
+            <OfflineSyncHeaderControls />
+            <PWAInstallButton />
             {tenant && <PlanBadge plan={tenant.plan} />}
 
             <button
@@ -315,6 +322,8 @@ export function AppShell(): React.ReactElement {
             </Button>
           </div>
         </header>
+
+        <OfflineBannerAndDrawer />
 
         {/* Page Viewport with 150ms Framer Motion transition */}
         <main className="flex-1 p-6 max-w-[1360px] w-full mx-auto">

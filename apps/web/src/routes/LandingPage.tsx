@@ -8,6 +8,7 @@ import { Separator } from '@/components/ui/separator';
 import { apiFetch } from '@/lib/api';
 import { useAuthStore, type AuthTenant, type AuthUser } from '@/stores/authStore';
 import { useUiStore } from '@/stores/uiStore';
+import { PWAInstallButton } from '@/lib/usePWAInstall';
 import { formatBDT } from '@/lib/utils';
 
 export function LandingPage(): React.ReactElement {
@@ -87,6 +88,7 @@ export function LandingPage(): React.ReactElement {
         </nav>
 
         <div className="flex items-center gap-3 shrink-0">
+          <PWAInstallButton />
           <Button
             size="sm"
             onClick={() => {

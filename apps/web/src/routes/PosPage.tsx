@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   CheckCircle2,
+  CloudOff,
+  Database,
   Minus,
   Plus,
   Printer,
@@ -13,7 +15,16 @@ import {
 import { PAYMENT_METHODS, type PaymentMethod } from '@dokanos/shared';
 import { useAuthStore } from '@/stores/authStore';
 import { useUiStore } from '@/stores/uiStore';
-import { apiFetch } from '@/lib/api';
+import { useIsOffline, useOfflineStore } from '@/stores/offlineStore';
+import { apiFetch, ApiClientError } from '@/lib/api';
+import {
+  applyOfflinePosSaleToSnapshots,
+  enqueueOutboxItem,
+  getTenantSnapshot,
+  saveTenantSnapshot,
+  type CachedCompletedSale,
+  type CachedProductItem,
+} from '@/lib/offlineCache';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -21,41 +32,21 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { formatBDT, formatDateDhaka } from '@/lib/utils';
 
-interface ProductItem {
-  _id: string;
-  name: string;
-  category: string;
-  unit: string;
-  sku: string;
-  sellPrice: number;
-  stock: number;
-  lowStockAt: number;
-}
+type ProductItem = CachedProductItem;
+type CompletedSale = CachedCompletedSale;
 
 interface CartLine {
   product: ProductItem;
   qty: number;
 }
 
-interface CompletedSale {
-  _id: string;
-  invoiceNo: string;
-  items: Array<{ name: string; qty: number; price: number; lineTotal: number }>;
-  subtotal: number;
-  discount: number;
-  total: number;
-  paidAmount: number;
-  dueAmount: number;
-  paymentMethod: string;
-  paymentStatus: string;
-  customerName: string;
-  customerPhone: string;
-  createdAt: string;
-}
-
 export function PosPage(): React.ReactElement {
   const tenant = useAuthStore((s) => s.tenant);
   const addToast = useUiStore((s) => s.addToast);
+  const isOffline = useIsOffline();
+  const refreshOfflineState = useOfflineStore((s) => s.refreshOfflineState);
+  const setDrawerOpen = useOfflineStore((s) => s.setDrawerOpen);
+  const outboxCount = useOfflineStore((s) => s.outboxItems.length);
   const queryClient = useQueryClient();
 
   const [search, setSearch] = useState('');
@@ -69,9 +60,33 @@ export function PosPage(): React.ReactElement {
   const [lastReceipt, setLastReceipt] = useState<CompletedSale | null>(null);
 
   const { data: productsRes, isLoading } = useQuery({
-    queryKey: ['products', tenant?.id, 'pos-catalog'],
-    queryFn: () =>
-      apiFetch<{ data: ProductItem[] }>('/api/v1/products?limit=100&sort=name:asc'),
+    queryKey: ['products', tenant?.id, 'pos-catalog', isOffline ? 'offline' : 'online'],
+    queryFn: async (): Promise<{ data: ProductItem[]; fromCache?: boolean }> => {
+      if (!tenant?.id) return { data: [] };
+
+      if (isOffline) {
+        const snap = await getTenantSnapshot<ProductItem[]>(tenant.id, 'pos-products');
+        return { data: snap?.data ?? [], fromCache: true };
+      }
+
+      try {
+        const res = await apiFetch<{ data: ProductItem[] }>(
+          '/api/v1/products?limit=100&sort=name:asc',
+        );
+        await saveTenantSnapshot(tenant.id, 'pos-products', res.data);
+        await refreshOfflineState(tenant.id);
+        return { data: res.data, fromCache: false };
+      } catch (err) {
+        // Fallback to local IndexedDB snapshot on network drop
+        if (!(err instanceof ApiClientError)) {
+          const snap = await getTenantSnapshot<ProductItem[]>(tenant.id, 'pos-products');
+          if (snap) {
+            return { data: snap.data, fromCache: true };
+          }
+        }
+        throw err;
+      }
+    },
     enabled: Boolean(tenant?.id),
   });
 
@@ -163,22 +178,114 @@ export function PosPage(): React.ReactElement {
       : Math.min(Math.max(0, Number(customPaidAmount) || 0), grandTotal);
   const bakiDueAmount = Number(Math.max(0, grandTotal - paidAmountNum).toFixed(2));
 
+  const completeOfflineSale = async (): Promise<{ data: CompletedSale }> => {
+    if (!tenant?.id) {
+      throw new Error('Shop session is not active');
+    }
+
+    const now = new Date();
+    const ymd = now.toISOString().slice(0, 10).replace(/-/g, '');
+    const suffix = String(now.getTime()).slice(-4);
+    const tempInvoiceNo = `OFF-${ymd}-${suffix}`;
+    const paymentStatus =
+      bakiDueAmount === 0 ? 'paid' : paidAmountNum === 0 ? 'due' : 'partial';
+
+    const offlineSale: CompletedSale = {
+      _id: `offline-sale-${now.getTime()}`,
+      invoiceNo: tempInvoiceNo,
+      items: cart.map((line) => ({
+        name: line.product.name,
+        qty: line.qty,
+        price: line.product.sellPrice,
+        lineTotal: Number((line.product.sellPrice * line.qty).toFixed(2)),
+      })),
+      subtotal,
+      discount: safeDiscount,
+      total: grandTotal,
+      paidAmount: paidAmountNum,
+      dueAmount: bakiDueAmount,
+      paymentMethod,
+      paymentStatus,
+      customerName: customerName.trim() || 'Walk-in Customer',
+      customerPhone: customerPhone.trim(),
+      createdAt: now.toISOString(),
+      isOfflineQueued: true,
+    };
+
+    const { updatedProducts } = await applyOfflinePosSaleToSnapshots(
+      tenant.id,
+      cart,
+      offlineSale,
+    );
+
+    await enqueueOutboxItem({
+      id: offlineSale._id,
+      tenantId: tenant.id,
+      type: 'pos_sale',
+      title: `POS Sale ${tempInvoiceNo}`,
+      subtitle: `${cart.reduce((s, l) => s + l.qty, 0)} unit(s) · ${
+        offlineSale.customerName
+      }${bakiDueAmount > 0 ? ` · Baki ${formatBDT(bakiDueAmount)}` : ''}`,
+      amount: grandTotal,
+      createdAt: now.toISOString(),
+      status: 'pending',
+      salePayload: {
+        items: cart.map((line) => ({
+          productId: line.product._id,
+          qty: line.qty,
+        })),
+        discount: safeDiscount,
+        paymentMethod,
+        paidAmount: paidAmountNum,
+        customerName: customerName.trim() || 'Walk-in Customer',
+        customerPhone: customerPhone.trim(),
+      },
+      receiptSnapshot: offlineSale,
+    });
+
+    // Update TanStack Query caches immediately for instant offline UI feedback
+    queryClient.setQueryData(
+      ['products', tenant.id, 'pos-catalog', 'offline'],
+      { data: updatedProducts, fromCache: true },
+    );
+    queryClient.setQueryData(
+      ['products', tenant.id, 'pos-catalog', 'online'],
+      { data: updatedProducts, fromCache: true },
+    );
+    void queryClient.invalidateQueries({ queryKey: ['dues', tenant.id] });
+
+    await refreshOfflineState(tenant.id);
+    return { data: offlineSale };
+  };
+
   const createSaleMutation = useMutation({
     mutationFn: async () => {
-      return apiFetch<{ data: CompletedSale }>('/api/v1/sales', {
-        method: 'POST',
-        body: JSON.stringify({
-          items: cart.map((line) => ({
-            productId: line.product._id,
-            qty: line.qty,
-          })),
-          discount: safeDiscount,
-          paymentMethod,
-          paidAmount: paidAmountNum,
-          customerName: customerName.trim() || 'Walk-in Customer',
-          customerPhone: customerPhone.trim(),
-        }),
-      });
+      if (isOffline) {
+        return completeOfflineSale();
+      }
+
+      try {
+        return await apiFetch<{ data: CompletedSale }>('/api/v1/sales', {
+          method: 'POST',
+          body: JSON.stringify({
+            items: cart.map((line) => ({
+              productId: line.product._id,
+              qty: line.qty,
+            })),
+            discount: safeDiscount,
+            paymentMethod,
+            paidAmount: paidAmountNum,
+            customerName: customerName.trim() || 'Walk-in Customer',
+            customerPhone: customerPhone.trim(),
+          }),
+        });
+      } catch (err) {
+        // If network dropped mid-checkout (not a 4xx/5xx server error), seamlessly queue in Offline Outbox
+        if (!(err instanceof ApiClientError)) {
+          return completeOfflineSale();
+        }
+        throw err;
+      }
     },
     onSuccess: (res) => {
       setLastReceipt(res.data);
@@ -188,16 +295,26 @@ export function PosPage(): React.ReactElement {
       setCustomerName('');
       setCustomerPhone('');
 
-      void queryClient.invalidateQueries({ queryKey: ['products', tenant?.id] });
-      void queryClient.invalidateQueries({ queryKey: ['dashboard', tenant?.id] });
-      void queryClient.invalidateQueries({ queryKey: ['sales', tenant?.id] });
-      void queryClient.invalidateQueries({ queryKey: ['dues', tenant?.id] });
+      if (!res.data.isOfflineQueued) {
+        void queryClient.invalidateQueries({ queryKey: ['products', tenant?.id] });
+        void queryClient.invalidateQueries({ queryKey: ['dashboard', tenant?.id] });
+        void queryClient.invalidateQueries({ queryKey: ['sales', tenant?.id] });
+        void queryClient.invalidateQueries({ queryKey: ['dues', tenant?.id] });
 
-      addToast({
-        title: `Sale Completed (${res.data.invoiceNo})`,
-        description: `Total ${formatBDT(res.data.total)} · Stock decremented atomically.`,
-        variant: 'success',
-      });
+        addToast({
+          title: `Sale Completed (${res.data.invoiceNo})`,
+          description: `Total ${formatBDT(res.data.total)} · Stock decremented atomically.`,
+          variant: 'success',
+        });
+      } else {
+        addToast({
+          title: `Offline Sale Queued (${res.data.invoiceNo})`,
+          description: `Saved to local shop ledger (${formatBDT(
+            res.data.total,
+          )}). Will sync automatically when online.`,
+          variant: 'warning',
+        });
+      }
     },
     onError: (err) => {
       addToast({
@@ -216,9 +333,24 @@ export function PosPage(): React.ReactElement {
             POS Counter Terminal
           </h1>
           <p className="text-xs text-muted-foreground">
-            Click any product to add to cart. Stock decrements atomically inside a MongoDB
-            transaction.
+            Click any product to add to cart. Works online (MongoDB transaction) and during shop
+            network outages (IndexedDB Outbox).
           </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {(isOffline || productsRes?.fromCache) && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-warning/40 bg-warning/15 text-warning text-xs font-medium">
+              <CloudOff className="h-3.5 w-3.5" />
+              Local POS Catalog Active ({products.length} items)
+            </span>
+          )}
+          {outboxCount > 0 && (
+            <Button variant="outline" size="sm" onClick={() => setDrawerOpen(true)}>
+              <Database className="h-3.5 w-3.5 text-primary" />
+              Queued Sales ({outboxCount})
+            </Button>
+          )}
         </div>
       </div>
 
@@ -507,7 +639,9 @@ export function PosPage(): React.ReactElement {
                 <Printer className="h-4 w-4" />
                 {createSaleMutation.isPending
                   ? 'Settling Transaction...'
-                  : 'Settle & Print Receipt'}
+                  : isOffline
+                    ? 'Queue Offline Sale & Print Receipt'
+                    : 'Settle & Print Receipt'}
               </Button>
             </CardContent>
           </Card>
@@ -524,6 +658,12 @@ export function PosPage(): React.ReactElement {
                 <div className="text-xs text-muted-foreground">
                   Invoice {lastReceipt.invoiceNo} · {formatDateDhaka(lastReceipt.createdAt)}
                 </div>
+                {lastReceipt.isOfflineQueued && (
+                  <div className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded bg-warning/15 text-warning text-[11px] font-mono">
+                    <CloudOff className="h-3 w-3" />
+                    Queued Offline — Will sync on reconnect
+                  </div>
+                )}
               </div>
               <CheckCircle2 className="h-6 w-6 text-primary" />
             </div>
