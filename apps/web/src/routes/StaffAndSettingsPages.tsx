@@ -216,10 +216,10 @@ export function StaffPage(): React.ReactElement {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="rounded-md border border-border overflow-x-auto">
-                <table className="w-full text-xs">
+              <div className="rounded-md border bg-card text-card-foreground overflow-x-auto">
+                <table className="w-full text-xs text-foreground">
                   <thead>
-                    <tr className="bg-secondary/60 border-b border-border text-muted-foreground">
+                    <tr className="bg-secondary/60 border-b text-muted-foreground">
                       <th className="py-2 px-3 text-left">Permission</th>
                       <th className="py-2 px-3 text-center">Owner</th>
                       <th className="py-2 px-3 text-center">Manager</th>
@@ -230,15 +230,15 @@ export function StaffPage(): React.ReactElement {
                     {Object.entries(PERMISSIONS).map(([perm, roles]) => {
                       const roleList = roles as readonly string[];
                       return (
-                        <tr key={perm}>
-                          <td className="py-1.5 px-3 font-mono">{perm}</td>
-                          <td className="py-1.5 px-3 text-center">
+                        <tr key={perm} className="hover:bg-secondary/40 transition-colors">
+                          <td className="py-1.5 px-3 font-mono text-foreground">{perm}</td>
+                          <td className="py-1.5 px-3 text-center text-foreground">
                             {roleList.includes('owner') ? 'Yes' : '—'}
                           </td>
-                          <td className="py-1.5 px-3 text-center">
+                          <td className="py-1.5 px-3 text-center text-foreground">
                             {roleList.includes('manager') ? 'Yes' : '—'}
                           </td>
-                          <td className="py-1.5 px-3 text-center">
+                          <td className="py-1.5 px-3 text-center text-foreground">
                             {roleList.includes('staff') ? 'Yes' : '—'}
                           </td>
                         </tr>
@@ -285,10 +285,14 @@ export function StaffPage(): React.ReactElement {
                   id="st-role"
                   value={role}
                   onChange={(e) => setRole(e.target.value as 'manager' | 'staff')}
-                  className="flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm"
+                  className="flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground"
                 >
-                  <option value="staff">Staff (POS Sales & Product Lookup)</option>
-                  <option value="manager">Manager (Inventory, Purchases, Dues)</option>
+                  <option value="staff" className="bg-card text-foreground">
+                    Staff (POS Sales & Product Lookup)
+                  </option>
+                  <option value="manager" className="bg-card text-foreground">
+                    Manager (Inventory, Purchases, Dues)
+                  </option>
                 </select>
               </div>
               <Button
@@ -1301,8 +1305,10 @@ export function SettingsPage(): React.ReactElement {
                             </span>
                           ) : (
                             <div className="inline-flex items-center gap-1.5">
-                              <button
+                              <Button
                                 type="button"
+                                variant="outline"
+                                size="sm"
                                 disabled={!canWriteStaff || toggleStatusMutation.isPending}
                                 onClick={() =>
                                   toggleStatusMutation.mutate({
@@ -1310,18 +1316,20 @@ export function SettingsPage(): React.ReactElement {
                                     status: member.status === 'disabled' ? 'active' : 'disabled',
                                   })
                                 }
-                                className="rounded border border-border bg-card px-2 py-1 text-[11px] font-medium text-foreground hover:bg-secondary transition-colors cursor-pointer disabled:opacity-50"
+                                className="h-7 px-2.5 text-[11px]"
                               >
                                 {member.status === 'disabled' ? 'Enable' : 'Disable'}
-                              </button>
-                              <button
+                              </Button>
+                              <Button
                                 type="button"
+                                variant="outline"
+                                size="sm"
                                 disabled={!canWriteStaff || deleteStaffMutation.isPending}
                                 onClick={() => deleteStaffMutation.mutate(member._id)}
-                                className="rounded border border-destructive/30 bg-destructive/10 px-2 py-1 text-[11px] font-semibold text-destructive hover:bg-destructive/20 transition-colors cursor-pointer disabled:opacity-50"
+                                className="h-7 px-2.5 text-[11px] border-destructive/30 bg-destructive/10 text-destructive hover:bg-destructive/20 hover:text-destructive"
                               >
                                 Revoke
-                              </button>
+                              </Button>
                             </div>
                           )}
                         </td>
@@ -1493,15 +1501,17 @@ export function SettingsPage(): React.ReactElement {
           </div>
 
           <div className="flex items-center gap-2 self-start sm:self-auto">
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               onClick={() => setShowAllPermissions((prev) => !prev)}
-              className="rounded border border-border bg-secondary/60 px-2.5 py-1 font-mono text-[10px] font-semibold text-foreground hover:bg-secondary transition-colors cursor-pointer"
+              className="h-7 px-2.5 font-mono text-[10px]"
             >
               {showAllPermissions
                 ? 'Show Summary Scopes (8)'
                 : `Show All ${Object.keys(PERMISSIONS).length} API Scopes`}
-            </button>
+            </Button>
             <span className="rounded border border-border bg-secondary/60 px-2.5 py-1 font-mono text-[10px] font-medium text-muted-foreground">
               Role-Based Access Control (RBAC 2.1)
             </span>
