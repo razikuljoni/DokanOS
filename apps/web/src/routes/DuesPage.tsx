@@ -10,7 +10,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { Banknote, CloudOff, Database, Search, X } from 'lucide-react';
+import { Banknote, CloudOff, Database, Download, Search, X } from 'lucide-react';
 import { PAYMENT_METHODS, type PaymentMethod } from '@dokanos/shared';
 import { useAuthStore } from '@/stores/authStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -33,7 +33,7 @@ import {
   StatCard,
   type DataTableColumn,
 } from '@/components/SharedWidgets';
-import { formatBDT, formatDateDhaka } from '@/lib/utils';
+import { downloadCsvFile, formatBDT, formatDateDhaka } from '@/lib/utils';
 
 type UnifiedDueItem = CachedUnifiedDueItem;
 type DuesSummary = CachedDuesSummary;
@@ -259,6 +259,65 @@ export function DuesPage(): React.ReactElement {
   });
 
   const summary = summaryRes?.data;
+  const duesList = duesRes?.data ?? [];
+
+  const handleDownloadDuesCsv = (): void => {
+    if (duesList.length === 0) {
+      addToast({
+        title: 'No Dues to Export',
+        description: 'There are no open Baki records matching the current filter.',
+        variant: 'warning',
+      });
+      return;
+    }
+
+    const headers = [
+      'Reference No',
+      'Ledger Type',
+      'Party Name',
+      'Party Phone',
+      'Origin Date (Asia/Dhaka)',
+      'Timestamp (ISO)',
+      'Age (Days)',
+      'Ageing Bucket',
+      'Original Bill (BDT)',
+      'Paid Amount (BDT)',
+      'Remaining Due (BDT)',
+      'Sync Status',
+    ];
+
+    const rows = duesList.map((row) => [
+      row.refNo,
+      row.partyType === 'customer' ? 'Customer Receivable' : 'Supplier Payable',
+      row.partyName,
+      row.partyPhone || '',
+      formatDateDhaka(row.createdAt),
+      row.createdAt,
+      row.ageDays,
+      `${row.ageingBucket} days`,
+      row.totalAmount.toFixed(2),
+      row.paidAmount.toFixed(2),
+      row.dueAmount.toFixed(2),
+      row.isOfflineQueued ? 'Pending Offline Sync' : 'Synced',
+    ]);
+
+    const dateStamp = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Dhaka',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+    const filename = `${tenant?.slug ?? 'dokanos'}-baki-dues-${dateStamp}.csv`;
+
+    downloadCsvFile(filename, headers, rows);
+
+    addToast({
+      title: 'Baki Dues CSV Downloaded',
+      description: `Exported ${duesList.length} Baki record(s) to ${filename}.`,
+      variant: 'success',
+    });
+  };
+
   const chartData = summary
     ? [
         {
@@ -392,7 +451,7 @@ export function DuesPage(): React.ReactElement {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {(isOffline || duesRes?.fromCache) && (
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-warning/40 bg-warning/15 text-warning text-xs font-medium">
               <CloudOff className="h-3.5 w-3.5" />
@@ -405,6 +464,15 @@ export function DuesPage(): React.ReactElement {
               Outbox ({outboxCount})
             </Button>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={duesLoading || duesList.length === 0}
+            onClick={handleDownloadDuesCsv}
+          >
+            <Download className="h-3.5 w-3.5" />
+            Download CSV
+          </Button>
         </div>
       </div>
 

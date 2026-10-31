@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CloudOff, Eye, Plus, Printer, RotateCcw, Search, X } from 'lucide-react';
+import { CloudOff, Download, Eye, Plus, Printer, RotateCcw, Search, X } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useIsOffline } from '@/stores/offlineStore';
@@ -15,7 +15,7 @@ import {
   type DataTableColumn,
   type ThermalPaperWidth,
 } from '@/components/SharedWidgets';
-import { formatBDT, formatDateDhaka } from '@/lib/utils';
+import { downloadCsvFile, formatBDT, formatDateDhaka } from '@/lib/utils';
 import type { PaginationMeta } from '@dokanos/shared';
 
 interface SaleRecord {
@@ -54,6 +54,7 @@ export function SalesListPage(): React.ReactElement {
   const [selectedSale, setSelectedSale] = useState<SaleRecord | null>(null);
   const [viewMode, setViewMode] = useState<'thermal' | 'ledger'>('thermal');
   const [paperWidth, setPaperWidth] = useState<ThermalPaperWidth>('80mm');
+  const [isExportingCsv, setIsExportingCsv] = useState(false);
 
   const isOffline = useIsOffline();
   const canReturn = user?.role === 'owner' || user?.role === 'manager';
@@ -64,6 +65,121 @@ export function SalesListPage(): React.ReactElement {
     window.setTimeout(() => {
       window.print();
     }, 60);
+  };
+
+  const handleDownloadSalesCsv = async (): Promise<void> => {
+    if (isExportingCsv) return;
+    setIsExportingCsv(true);
+
+    try {
+      let recordsToExport: SaleRecord[] = data?.data ?? [];
+
+      // When online, fetch all pages matching the current filter for complete accounting export
+      if (!isOffline && tenant?.id) {
+        try {
+          const allRecords: SaleRecord[] = [];
+          let currentPage = 1;
+          let totalPages = 1;
+
+          do {
+            const params = new URLSearchParams({
+              page: String(currentPage),
+              limit: '100',
+            });
+            if (search.trim()) params.set('search', search.trim());
+            if (statusFilter !== 'all') params.set('paymentStatus', statusFilter);
+
+            const res = await apiFetch<{ data: SaleRecord[]; meta: PaginationMeta }>(
+              `/api/v1/sales?${params.toString()}`,
+            );
+            allRecords.push(...res.data);
+            totalPages = res.meta?.totalPages ?? 1;
+            currentPage += 1;
+          } while (currentPage <= totalPages && currentPage <= 20);
+
+          if (allRecords.length > 0) {
+            recordsToExport = allRecords;
+          }
+        } catch {
+          // Fallback to currently loaded/cached records if network drops mid-export
+          recordsToExport = data?.data ?? [];
+        }
+      }
+
+      if (recordsToExport.length === 0) {
+        addToast({
+          title: 'No Sales to Export',
+          description: 'There are no matching sale records to download.',
+          variant: 'warning',
+        });
+        return;
+      }
+
+      const headers = [
+        'Invoice No',
+        'Date (Asia/Dhaka)',
+        'Timestamp (ISO)',
+        'Customer Name',
+        'Customer Phone',
+        'Items Summary',
+        'SKU Count',
+        'Total Units',
+        'Subtotal (BDT)',
+        'Discount (BDT)',
+        'Total (BDT)',
+        'Paid Amount (BDT)',
+        'Baki Due (BDT)',
+        'Payment Method',
+        'Payment Status',
+        'Returned',
+        'Cashier',
+      ];
+
+      const rows = recordsToExport.map((sale) => {
+        const itemsSummary = sale.items
+          .map((item) => `${item.name} x${item.qty} (@${item.price})`)
+          .join('; ');
+        const totalUnits = sale.items.reduce((sum, item) => sum + item.qty, 0);
+
+        return [
+          sale.invoiceNo,
+          formatDateDhaka(sale.createdAt),
+          sale.createdAt,
+          sale.customerName || 'Walk-in Customer',
+          sale.customerPhone || '',
+          itemsSummary,
+          sale.items.length,
+          totalUnits,
+          sale.subtotal.toFixed(2),
+          sale.discount.toFixed(2),
+          sale.total.toFixed(2),
+          sale.paidAmount.toFixed(2),
+          sale.dueAmount.toFixed(2),
+          sale.paymentMethod.toUpperCase(),
+          sale.paymentStatus.toUpperCase(),
+          sale.isReturned ? 'Yes' : 'No',
+          sale.soldBy?.name ?? '',
+        ];
+      });
+
+      const dateStamp = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Dhaka',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date());
+      const filename = `${tenant?.slug ?? 'dokanos'}-sales-history-${dateStamp}.csv`;
+
+      downloadCsvFile(filename, headers, rows);
+
+      addToast({
+        title: 'Sales CSV Downloaded',
+        description: `Exported ${recordsToExport.length} invoice record(s) to ${filename}.`,
+        variant: 'success',
+      });
+    } finally {
+      setIsExportingCsv(false);
+    }
   };
 
   const { data, isLoading } = useQuery({
@@ -256,12 +372,23 @@ export function SalesListPage(): React.ReactElement {
             Complete audit trail of shop invoices, payment statuses, and customer returns.
           </p>
         </div>
-        <Link to="/app/sales/new">
-          <Button size="sm">
-            <Plus className="h-3.5 w-3.5" />
-            New POS Sale
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={isLoading || isExportingCsv || (data?.data?.length ?? 0) === 0}
+            onClick={() => void handleDownloadSalesCsv()}
+          >
+            <Download className="h-3.5 w-3.5" />
+            {isExportingCsv ? 'Exporting CSV...' : 'Download CSV'}
           </Button>
-        </Link>
+          <Link to="/app/sales/new">
+            <Button size="sm">
+              <Plus className="h-3.5 w-3.5" />
+              New POS Sale
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {(isOffline || data?.fromCache) && (
