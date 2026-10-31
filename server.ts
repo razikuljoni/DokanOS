@@ -10,6 +10,7 @@ import { initSocketServer } from './apps/api/src/realtime/socket.js';
 import { initInProcessJobsWorker } from './apps/api/src/queues/worker.js';
 import { seedDemoData } from './apps/api/src/seedData.js';
 import { env } from './apps/api/src/config/env.js';
+import { authRateLimiter } from './apps/api/src/middleware/rateLimit.js';
 
 async function startDevBridge(): Promise<void> {
   await connectDatabase();
@@ -23,7 +24,11 @@ async function startDevBridge(): Promise<void> {
   const app = express();
   const port = Number(process.env.PORT ?? 3000);
 
+  // Add trust proxy for accurate rate limiting behind Render
+  app.set('trust proxy', 1);
+
   // Mount the DokanOS Express 5 API application (/health and /api/v1/*)
+  app.use('/api/v1/auth', authRateLimiter);
   app.use(apiApp);
 
   if (process.env.NODE_ENV !== 'production') {

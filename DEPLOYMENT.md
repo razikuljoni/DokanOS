@@ -88,7 +88,7 @@ This guide walks through deploying **DokanOS** end-to-end on **100% free tiers**
    - **Build Command:** `pnpm --filter @dokanos/shared build && pnpm build`
    - **Output Directory:** `dist`
 3. Set the environment variables from **Table B.2** below (`VITE_API_URL` and `VITE_SOCKET_URL` pointing to your Render service URL).
-4. Deploy. Once Vercel assigns your production domain (e.g. `https://dokanos-web.vercel.app`), update `FRONTEND_URL` in Render to match it.
+4. Deploy. Set `FRONTEND_URL=https://dokanos.onrender.com` in Render for the unified same-origin deployment.
 
 > **Clean Release Tree Note:** If deploying from an AI Studio export, run `bash scripts/prepare-release-tree.sh` on your release branch before pushing so AI Studio's preview harness files (`root server.ts`, `root index.html`, `root vite.config.ts`, `root metadata.json`) are excluded.
 
