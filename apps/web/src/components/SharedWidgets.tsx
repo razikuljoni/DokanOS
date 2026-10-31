@@ -11,3 +11,10 @@ export { Skeleton } from './Skeleton';
 export { DuePaymentDialog, type DuePaymentDialogTarget } from './DuePaymentDialog';
 export { ProductForm } from './ProductForm';
 export { SaleForm } from './SaleForm';
+export {
+  ThermalReceipt,
+  type PrintableSale,
+  type PrintableSaleItem,
+  type ThermalPaperWidth,
+} from './ThermalReceipt';
+

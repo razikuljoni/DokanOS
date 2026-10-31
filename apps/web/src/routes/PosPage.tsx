@@ -30,7 +30,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
-import { formatBDT, formatDateDhaka } from '@/lib/utils';
+import { ThermalReceipt, type ThermalPaperWidth } from '@/components/SharedWidgets';
+import { formatBDT } from '@/lib/utils';
 
 type ProductItem = CachedProductItem;
 type CompletedSale = CachedCompletedSale;
@@ -42,6 +43,7 @@ interface CartLine {
 
 export function PosPage(): React.ReactElement {
   const tenant = useAuthStore((s) => s.tenant);
+  const user = useAuthStore((s) => s.user);
   const addToast = useUiStore((s) => s.addToast);
   const isOffline = useIsOffline();
   const refreshOfflineState = useOfflineStore((s) => s.refreshOfflineState);
@@ -58,6 +60,8 @@ export function PosPage(): React.ReactElement {
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [lastReceipt, setLastReceipt] = useState<CompletedSale | null>(null);
+  const [lastCompletedSale, setLastCompletedSale] = useState<CompletedSale | null>(null);
+  const [paperWidth, setPaperWidth] = useState<ThermalPaperWidth>('80mm');
 
   const { data: productsRes, isLoading } = useQuery({
     queryKey: ['products', tenant?.id, 'pos-catalog', isOffline ? 'offline' : 'online'],
@@ -292,6 +296,7 @@ export function PosPage(): React.ReactElement {
     },
     onSuccess: (res) => {
       setLastReceipt(res.data);
+      setLastCompletedSale(res.data);
       setCart([]);
       setDiscount(0);
       setCustomPaidAmount('');
@@ -341,12 +346,22 @@ export function PosPage(): React.ReactElement {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {(isOffline || productsRes?.fromCache) && (
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-warning/40 bg-warning/15 text-warning text-xs font-medium">
               <CloudOff className="h-3.5 w-3.5" />
               Local POS Catalog Active ({products.length} items)
             </span>
+          )}
+          {lastCompletedSale && !lastReceipt && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setLastReceipt(lastCompletedSale)}
+            >
+              <Printer className="h-3.5 w-3.5" />
+              Reprint Last Receipt
+            </Button>
           )}
           {outboxCount > 0 && (
             <Button variant="outline" size="sm" onClick={() => setDrawerOpen(true)}>
@@ -651,65 +666,78 @@ export function PosPage(): React.ReactElement {
         </div>
       </div>
 
-      {/* Printable Invoice Receipt Modal */}
+      {/* Printable Thermal Receipt Modal */}
       {lastReceipt && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-card border border-border rounded-md max-w-md w-full p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-border pb-3">
-              <div>
-                <div className="font-display text-lg font-bold">{tenant?.name}</div>
-                <div className="text-xs text-muted-foreground">
-                  {lastReceipt.isOfflineQueued
-                    ? lastReceipt.invoiceNo
-                    : `Invoice ${lastReceipt.invoiceNo}`}{' '}
-                  · {formatDateDhaka(lastReceipt.createdAt)}
-                </div>
-                {lastReceipt.isOfflineQueued && (
-                  <div className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded bg-warning/15 text-warning text-[11px] font-mono">
-                    <CloudOff className="h-3 w-3" />
-                    Pending sync — invoice number assigned on sync
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-card border border-border rounded-md max-w-md w-full p-5 space-y-4 max-h-[92vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-border pb-3 no-print">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-5 w-5 text-primary shrink-0" />
+                <div>
+                  <div className="font-display text-sm font-bold">
+                    {lastReceipt.isOfflineQueued
+                      ? 'Offline Sale Saved to Ledger'
+                      : `Sale Completed (${lastReceipt.invoiceNo})`}
                   </div>
-                )}
-              </div>
-              <CheckCircle2 className="h-6 w-6 text-primary" />
-            </div>
-
-            <div className="space-y-1.5 text-xs">
-              {lastReceipt.items.map((it, idx) => (
-                <div key={idx} className="flex justify-between py-1 border-b border-border/60">
-                  <span>
-                    {it.name} × {it.qty}
-                  </span>
-                  <span className="font-mono tabular-nums">{formatBDT(it.lineTotal)}</span>
+                  <div className="text-[11px] text-muted-foreground">
+                    Thermal printer-ready cash/Baki memo
+                  </div>
                 </div>
-              ))}
+              </div>
+
+              <div
+                className="inline-flex items-center rounded border border-border bg-secondary p-0.5 text-[11px]"
+                role="group"
+                aria-label="Thermal paper width"
+              >
+                {(['80mm', '58mm'] as const).map((width) => (
+                  <button
+                    key={width}
+                    type="button"
+                    onClick={() => setPaperWidth(width)}
+                    className={`px-2 py-0.5 font-mono rounded-xs transition-colors cursor-pointer ${
+                      paperWidth === width
+                        ? 'bg-card text-foreground font-semibold shadow-2xs'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {width}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <div className="space-y-1 text-xs pt-1">
-              <div className="flex justify-between font-semibold text-sm">
-                <span>Total</span>
-                <span className="font-mono tabular-nums">{formatBDT(lastReceipt.total)}</span>
+            {lastReceipt.isOfflineQueued && (
+              <div className="no-print inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-warning/15 text-warning text-xs font-mono">
+                <CloudOff className="h-3.5 w-3.5 shrink-0" />
+                <span>Pending sync — invoice number assigned on sync</span>
               </div>
-              <div className="flex justify-between text-muted-foreground">
-                <span>Paid ({lastReceipt.paymentMethod.toUpperCase()})</span>
-                <span className="font-mono tabular-nums">{formatBDT(lastReceipt.paidAmount)}</span>
-              </div>
-              {lastReceipt.dueAmount > 0 && (
-                <div className="flex justify-between text-warning font-medium">
-                  <span>Baki Due</span>
-                  <span className="font-mono tabular-nums">{formatBDT(lastReceipt.dueAmount)}</span>
-                </div>
-              )}
+            )}
+
+            <div className="overflow-y-auto py-2 px-1 bg-secondary/40 rounded border border-border/70 flex-1">
+              <ThermalReceipt
+                sale={lastReceipt}
+                shopName={tenant?.name}
+                shopType={tenant?.type}
+                shopSlug={tenant?.slug}
+                cashierName={user?.name}
+                paperWidth={paperWidth}
+              />
             </div>
 
-            <div className="flex justify-end gap-2 pt-3 border-t border-border">
-              <Button variant="outline" size="sm" onClick={() => window.print()}>
-                <Printer className="h-3.5 w-3.5" />
-                Print
-              </Button>
-              <Button size="sm" onClick={() => setLastReceipt(null)}>
-                Done
-              </Button>
+            <div className="flex items-center justify-between gap-2 pt-3 border-t border-border no-print">
+              <span className="text-[11px] text-muted-foreground font-mono">
+                Format: {paperWidth} POS Roll
+              </span>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => window.print()}>
+                  <Printer className="h-3.5 w-3.5" />
+                  Print Thermal Receipt
+                </Button>
+                <Button size="sm" onClick={() => setLastReceipt(null)}>
+                  Done
+                </Button>
+              </div>
             </div>
           </div>
         </div>

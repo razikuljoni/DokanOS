@@ -104,3 +104,63 @@
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }
+
+.thermal-print-only {
+  display: none;
+}
+
+@media print {
+  @page {
+    margin: 0;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .thermal-print-only {
+    display: block !important;
+  }
+
+  .thermal-print-area,
+  .thermal-print-area * {
+    visibility: visible !important;
+  }
+
+  .thermal-print-area {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    margin: 0 !important;
+    padding: 3mm 2.5mm !important;
+    width: 80mm !important;
+    max-width: 80mm !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    z-index: 99999 !important;
+  }
+
+  .thermal-print-area.thermal-paper-58mm {
+    width: 58mm !important;
+    max-width: 58mm !important;
+    padding: 2mm 1.5mm !important;
+  }
+}
+

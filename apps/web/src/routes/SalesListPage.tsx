@@ -9,7 +9,12 @@ import { apiFetch, ApiClientError } from '@/lib/api';
 import { getTenantSnapshot, saveTenantSnapshot } from '@/lib/offlineCache';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { DataTable, type DataTableColumn } from '@/components/SharedWidgets';
+import {
+  DataTable,
+  ThermalReceipt,
+  type DataTableColumn,
+  type ThermalPaperWidth,
+} from '@/components/SharedWidgets';
 import { formatBDT, formatDateDhaka } from '@/lib/utils';
 import type { PaginationMeta } from '@dokanos/shared';
 
@@ -47,9 +52,19 @@ export function SalesListPage(): React.ReactElement {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selectedSale, setSelectedSale] = useState<SaleRecord | null>(null);
+  const [viewMode, setViewMode] = useState<'thermal' | 'ledger'>('thermal');
+  const [paperWidth, setPaperWidth] = useState<ThermalPaperWidth>('80mm');
 
   const isOffline = useIsOffline();
   const canReturn = user?.role === 'owner' || user?.role === 'manager';
+
+  const handleQuickPrint = (sale: SaleRecord): void => {
+    setSelectedSale(sale);
+    setViewMode('thermal');
+    window.setTimeout(() => {
+      window.print();
+    }, 60);
+  };
 
   const { data, isLoading } = useQuery({
     queryKey: ['sales', tenant?.id, { page, search, statusFilter, mode: isOffline ? 'offline' : 'online' }],
@@ -206,10 +221,28 @@ export function SalesListPage(): React.ReactElement {
       header: 'Invoice',
       align: 'right',
       render: (row) => (
-        <Button variant="ghost" size="sm" onClick={() => setSelectedSale(row)}>
-          <Eye className="h-3.5 w-3.5" />
-          View
-        </Button>
+        <div className="inline-flex items-center justify-end gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleQuickPrint(row)}
+            title={`Print thermal receipt for ${row.invoiceNo}`}
+          >
+            <Printer className="h-3.5 w-3.5" />
+            Print
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setSelectedSale(row);
+              setViewMode('thermal');
+            }}
+          >
+            <Eye className="h-3.5 w-3.5" />
+            View
+          </Button>
+        </div>
       ),
     },
   ];
@@ -287,8 +320,8 @@ export function SalesListPage(): React.ReactElement {
       {selectedSale && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-end">
           <div className="bg-card border-l border-border h-full max-w-lg w-full p-6 flex flex-col justify-between overflow-y-auto">
-            <div className="space-y-6">
-              <div className="flex items-start justify-between border-b border-border pb-4">
+            <div className="space-y-5">
+              <div className="flex items-start justify-between border-b border-border pb-4 no-print">
                 <div>
                   <h3 className="font-display text-lg font-bold">
                     Invoice {selectedSale.invoiceNo}
@@ -307,63 +340,136 @@ export function SalesListPage(): React.ReactElement {
                 </button>
               </div>
 
-              <div className="space-y-2">
-                <div className="text-xs font-medium text-muted-foreground">Line Items</div>
-                <div className="rounded-md border border-border divide-y divide-border">
-                  {selectedSale.items.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="p-3 flex items-center justify-between text-xs"
+              {/* View Mode & Thermal Roll Width Controls */}
+              <div className="flex flex-wrap items-center justify-between gap-2 no-print">
+                <div className="inline-flex items-center gap-1 p-1 bg-secondary rounded-md">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('thermal')}
+                    className={`px-2.5 py-1 text-xs font-medium rounded transition-colors cursor-pointer ${
+                      viewMode === 'thermal'
+                        ? 'bg-card text-foreground shadow-2xs'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    Thermal Receipt
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('ledger')}
+                    className={`px-2.5 py-1 text-xs font-medium rounded transition-colors cursor-pointer ${
+                      viewMode === 'ledger'
+                        ? 'bg-card text-foreground shadow-2xs'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    Ledger Details
+                  </button>
+                </div>
+
+                <div
+                  className="inline-flex items-center rounded border border-border bg-secondary p-0.5 text-xs"
+                  role="group"
+                  aria-label="Thermal paper width"
+                >
+                  {(['80mm', '58mm'] as const).map((width) => (
+                    <button
+                      key={width}
+                      type="button"
+                      onClick={() => setPaperWidth(width)}
+                      className={`px-2 py-0.5 font-mono rounded-xs transition-colors cursor-pointer ${
+                        paperWidth === width
+                          ? 'bg-card text-foreground font-semibold shadow-2xs'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
                     >
-                      <div>
-                        <div className="font-medium text-foreground">{item.name}</div>
-                        <div className="text-muted-foreground font-mono tabular-nums">
-                          {formatBDT(item.price)} × {item.qty}
-                        </div>
-                      </div>
-                      <div className="font-mono font-semibold tabular-nums">
-                        {formatBDT(item.lineTotal)}
-                      </div>
-                    </div>
+                      {width}
+                    </button>
                   ))}
                 </div>
               </div>
 
-              <div className="rounded-md border border-border bg-secondary/50 p-4 space-y-1.5 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Subtotal</span>
-                  <span className="font-mono tabular-nums">
-                    {formatBDT(selectedSale.subtotal)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Discount</span>
-                  <span className="font-mono tabular-nums">
-                    −{formatBDT(selectedSale.discount)}
-                  </span>
-                </div>
-                <div className="flex justify-between font-semibold text-sm pt-1 border-t border-border">
-                  <span>Total</span>
-                  <span className="font-mono tabular-nums">{formatBDT(selectedSale.total)}</span>
-                </div>
-                <div className="flex justify-between text-muted-foreground">
-                  <span>Paid ({selectedSale.paymentMethod.toUpperCase()})</span>
-                  <span className="font-mono tabular-nums">
-                    {formatBDT(selectedSale.paidAmount)}
-                  </span>
-                </div>
-                {selectedSale.dueAmount > 0 && (
-                  <div className="flex justify-between text-warning font-medium">
-                    <span>Remaining Baki Due</span>
-                    <span className="font-mono tabular-nums">
-                      {formatBDT(selectedSale.dueAmount)}
-                    </span>
-                  </div>
-                )}
+              {/* Thermal Receipt View (Always mounted in DOM so @media print captures it) */}
+              <div
+                className={
+                  viewMode === 'thermal'
+                    ? 'py-3 px-2 rounded-md border border-border bg-secondary/40'
+                    : 'thermal-print-only'
+                }
+              >
+                <ThermalReceipt
+                  sale={selectedSale}
+                  shopName={tenant?.name}
+                  shopType={tenant?.type}
+                  shopSlug={tenant?.slug}
+                  cashierName={selectedSale.soldBy?.name ?? user?.name}
+                  paperWidth={paperWidth}
+                />
               </div>
+
+              {viewMode === 'ledger' && (
+                <div className="space-y-4 no-print">
+                  <div className="space-y-2">
+                    <div className="text-xs font-medium text-muted-foreground">Line Items</div>
+                    <div className="rounded-md border border-border divide-y divide-border">
+                      {selectedSale.items.map((item, idx) => (
+                        <div
+                          key={idx}
+                          className="p-3 flex items-center justify-between text-xs"
+                        >
+                          <div>
+                            <div className="font-medium text-foreground">{item.name}</div>
+                            <div className="text-muted-foreground font-mono tabular-nums">
+                              {formatBDT(item.price)} × {item.qty}
+                            </div>
+                          </div>
+                          <div className="font-mono font-semibold tabular-nums">
+                            {formatBDT(item.lineTotal)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-md border border-border bg-secondary/50 p-4 space-y-1.5 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Subtotal</span>
+                      <span className="font-mono tabular-nums">
+                        {formatBDT(selectedSale.subtotal)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Discount</span>
+                      <span className="font-mono tabular-nums">
+                        −{formatBDT(selectedSale.discount)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between font-semibold text-sm pt-1 border-t border-border">
+                      <span>Total</span>
+                      <span className="font-mono tabular-nums">
+                        {formatBDT(selectedSale.total)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Paid ({selectedSale.paymentMethod.toUpperCase()})</span>
+                      <span className="font-mono tabular-nums">
+                        {formatBDT(selectedSale.paidAmount)}
+                      </span>
+                    </div>
+                    {selectedSale.dueAmount > 0 && (
+                      <div className="flex justify-between text-warning font-medium">
+                        <span>Remaining Baki Due</span>
+                        <span className="font-mono tabular-nums">
+                          {formatBDT(selectedSale.dueAmount)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
-            <div className="flex items-center justify-between gap-3 pt-4 border-t border-border">
+            <div className="flex items-center justify-between gap-3 pt-4 border-t border-border no-print">
               {canReturn &&
               selectedSale.paymentStatus === 'paid' &&
               !selectedSale.isReturned ? (
@@ -385,7 +491,7 @@ export function SalesListPage(): React.ReactElement {
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={() => window.print()}>
                   <Printer className="h-3.5 w-3.5" />
-                  Print Invoice
+                  Print Thermal Receipt
                 </Button>
                 <Button size="sm" onClick={() => setSelectedSale(null)}>
                   Close
