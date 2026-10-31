@@ -29,15 +29,41 @@ productsRouter.use(requireAuth, requireTenant);
 productsRouter.get('/low-stock', requirePermission('products:read'), async (req, res, next) => {
   try {
     const tenantObjectId = new Types.ObjectId(req.tenant!.id);
-    const items = await ProductModel.find({
+    const rawThreshold =
+      typeof req.query.threshold === 'string' && req.query.threshold.trim() !== ''
+        ? Number(req.query.threshold)
+        : null;
+    const hasCustomThreshold =
+      rawThreshold !== null && Number.isFinite(rawThreshold) && rawThreshold >= 0;
+
+    const filter: Record<string, unknown> = {
       tenantId: tenantObjectId,
       isActive: true,
-      $expr: { $lte: ['$stock', '$lowStockAt'] },
-    })
-      .sort({ stock: 1 })
+    };
+
+    if (hasCustomThreshold) {
+      filter.stock = { $lte: Math.floor(rawThreshold) };
+    } else {
+      filter.$expr = { $lte: ['$stock', '$lowStockAt'] };
+    }
+
+    const items = await ProductModel.find(filter)
+      .sort({ stock: 1, name: 1 })
       .lean();
 
-    res.status(200).json({ data: items });
+    const outOfStockCount = items.filter((item) => item.stock <= 0).length;
+    const lowStockCount = items.length - outOfStockCount;
+
+    res.status(200).json({
+      data: items,
+      summary: {
+        totalFlagged: items.length,
+        outOfStockCount,
+        lowStockCount,
+        thresholdMode: hasCustomThreshold ? 'custom' : 'product',
+        appliedThreshold: hasCustomThreshold ? Math.floor(rawThreshold) : null,
+      },
+    });
   } catch (err) {
     next(err);
   }

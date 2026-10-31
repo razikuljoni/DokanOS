@@ -1,26 +1,35 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
+  ArrowUpRight,
   Bell,
   CheckCheck,
+  CloudOff,
   CreditCard,
+  Download,
+  PackageMinus,
+  Search,
   ShieldCheck,
+  SlidersHorizontal,
+  ShoppingCart,
   X,
 } from 'lucide-react';
 import { PRO_PRICE_BDT } from '@dokanos/shared';
 import { useAuthStore } from '@/stores/authStore';
 import { useUiStore } from '@/stores/uiStore';
-import { apiFetch } from '@/lib/api';
+import { useIsOffline } from '@/stores/offlineStore';
+import { ApiClientError, apiFetch } from '@/lib/api';
+import { getTenantSnapshot } from '@/lib/offlineCache';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { DataTable, EmptyState, PlanBadge, type DataTableColumn } from '@/components/SharedWidgets';
-import { formatBDT, formatDateDhaka } from '@/lib/utils';
+import { downloadCsvFile, formatBDT, formatDateDhaka } from '@/lib/utils';
 
-// /app/alerts — Notifications Feed
+// /app/alerts — Low-Stock Watchlist & Notifications Feed
 interface NotificationItem {
   _id: string;
   type: 'low_stock' | 'due_reminder' | 'payment' | 'subscription';
@@ -31,15 +40,97 @@ interface NotificationItem {
   createdAt: string;
 }
 
+interface LowStockProductItem {
+  _id: string;
+  name: string;
+  category: string;
+  unit: 'pcs' | 'box' | 'bottle' | 'strip' | 'kg';
+  sku: string;
+  costPrice: number;
+  sellPrice: number;
+  stock: number;
+  lowStockAt: number;
+  isActive: boolean;
+}
+
 export function AlertsPage(): React.ReactElement {
   const tenant = useAuthStore((s) => s.tenant);
   const addToast = useUiStore((s) => s.addToast);
+  const isOffline = useIsOffline();
   const queryClient = useQueryClient();
+
+  const defaultShopThreshold = tenant?.lowStockThreshold ?? 5;
+  const [thresholdMode, setThresholdMode] = useState<'product' | 'custom'>('product');
+  const [customThresholdInput, setCustomThresholdInput] = useState<string>(
+    String(defaultShopThreshold),
+  );
+  const [severityFilter, setSeverityFilter] = useState<'all' | 'out' | 'low'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const parsedCustomThreshold = useMemo(() => {
+    const num = Number(customThresholdInput);
+    if (!Number.isFinite(num) || num < 0) return defaultShopThreshold;
+    return Math.floor(num);
+  }, [customThresholdInput, defaultShopThreshold]);
+
+  const { data: lowStockData, isLoading: isLowStockLoading } = useQuery({
+    queryKey: [
+      'products',
+      tenant?.id,
+      'low-stock-watchlist',
+      {
+        mode: thresholdMode,
+        threshold: thresholdMode === 'custom' ? parsedCustomThreshold : null,
+        offline: isOffline,
+      },
+    ],
+    queryFn: async (): Promise<{ data: LowStockProductItem[]; fromCache?: boolean }> => {
+      if (!tenant?.id) return { data: [] };
+
+      const filterCachedProducts = (products: LowStockProductItem[]): LowStockProductItem[] => {
+        return products
+          .filter((p) => p.isActive !== false)
+          .filter((p) =>
+            thresholdMode === 'custom' ? p.stock <= parsedCustomThreshold : p.stock <= p.lowStockAt,
+          )
+          .sort((a, b) => a.stock - b.stock || a.name.localeCompare(b.name));
+      };
+
+      if (isOffline) {
+        const snap = await getTenantSnapshot<LowStockProductItem[]>(tenant.id, 'pos-products');
+        return {
+          data: filterCachedProducts(snap?.data ?? []),
+          fromCache: true,
+        };
+      }
+
+      try {
+        const query =
+          thresholdMode === 'custom' ? `?threshold=${encodeURIComponent(parsedCustomThreshold)}` : '';
+        const res = await apiFetch<{ data: LowStockProductItem[] }>(
+          `/api/v1/products/low-stock${query}`,
+        );
+        return { data: res.data, fromCache: false };
+      } catch (err) {
+        if (!(err instanceof ApiClientError)) {
+          const snap = await getTenantSnapshot<LowStockProductItem[]>(tenant.id, 'pos-products');
+          if (snap) {
+            return {
+              data: filterCachedProducts(snap.data),
+              fromCache: true,
+            };
+          }
+        }
+        throw err;
+      }
+    },
+    enabled: Boolean(tenant?.id),
+  });
 
   const { data, isLoading } = useQuery({
     queryKey: ['notifications', tenant?.id, 'list'],
     queryFn: () => apiFetch<{ data: NotificationItem[] }>('/api/v1/notifications?limit=50'),
-    enabled: Boolean(tenant?.id),
+    enabled: Boolean(tenant?.id) && !isOffline,
   });
 
   const markReadMutation = useMutation({
@@ -61,85 +152,537 @@ export function AlertsPage(): React.ReactElement {
     },
   });
 
+  const allLowStockProducts = lowStockData?.data ?? [];
+
+  const filteredLowStockProducts = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return allLowStockProducts.filter((product) => {
+      if (severityFilter === 'out' && product.stock !== 0) return false;
+      if (severityFilter === 'low' && product.stock === 0) return false;
+      if (!q) return true;
+      return (
+        product.name.toLowerCase().includes(q) ||
+        product.sku.toLowerCase().includes(q) ||
+        product.category.toLowerCase().includes(q)
+      );
+    });
+  }, [allLowStockProducts, severityFilter, searchQuery]);
+
+  const watchlistSummary = useMemo(() => {
+    let outOfStockCount = 0;
+    let criticalLowCount = 0;
+    let totalShortageUnits = 0;
+    let estimatedRestockCostBdt = 0;
+
+    for (const item of allLowStockProducts) {
+      const effectiveThreshold =
+        thresholdMode === 'custom' ? parsedCustomThreshold : item.lowStockAt;
+      const shortage = Math.max(1, effectiveThreshold - item.stock + 1);
+      if (item.stock <= 0) {
+        outOfStockCount += 1;
+      } else {
+        criticalLowCount += 1;
+      }
+      totalShortageUnits += shortage;
+      estimatedRestockCostBdt += shortage * item.costPrice;
+    }
+
+    return {
+      totalFlagged: allLowStockProducts.length,
+      outOfStockCount,
+      criticalLowCount,
+      totalShortageUnits,
+      estimatedRestockCostBdt,
+    };
+  }, [allLowStockProducts, thresholdMode, parsedCustomThreshold]);
+
+  const handleExportLowStockCsv = (): void => {
+    if (filteredLowStockProducts.length === 0) {
+      addToast({
+        title: 'No Low-Stock Items to Export',
+        description: 'There are no products matching the current threshold filter.',
+        variant: 'warning',
+      });
+      return;
+    }
+
+    const headers = [
+      'SKU',
+      'Product Name',
+      'Category',
+      'Unit',
+      'Status',
+      'Current Stock',
+      'Defined Threshold',
+      'Suggested Reorder Qty',
+      'Unit Cost (BDT)',
+      'Est. Restock Cost (BDT)',
+    ];
+
+    const rows = filteredLowStockProducts.map((item) => {
+      const effectiveThreshold =
+        thresholdMode === 'custom' ? parsedCustomThreshold : item.lowStockAt;
+      const reorderQty = Math.max(1, effectiveThreshold - item.stock + 1);
+      const restockCost = reorderQty * item.costPrice;
+      return [
+        item.sku,
+        item.name,
+        item.category,
+        item.unit,
+        item.stock <= 0 ? 'OUT_OF_STOCK' : 'BELOW_THRESHOLD',
+        item.stock,
+        effectiveThreshold,
+        reorderQty,
+        item.costPrice,
+        restockCost,
+      ];
+    });
+
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    downloadCsvFile(
+      `dokanos-low-stock-alerts-${tenant?.slug ?? 'shop'}-${dateStamp}.csv`,
+      headers,
+      rows,
+    );
+
+    addToast({
+      title: 'Low-Stock Watchlist Exported',
+      description: `Downloaded ${rows.length} flagged product${rows.length === 1 ? '' : 's'} as CSV.`,
+      variant: 'success',
+    });
+  };
+
+  const lowStockColumns: DataTableColumn<LowStockProductItem>[] = [
+    {
+      key: 'sku',
+      header: 'SKU',
+      render: (row) => <span className="font-mono text-xs text-muted-foreground">{row.sku}</span>,
+    },
+    {
+      key: 'name',
+      header: 'Product',
+      render: (row) => (
+        <div>
+          <Link
+            to={`/app/products/${row._id}`}
+            className="font-medium text-foreground hover:text-primary hover:underline"
+          >
+            {row.name}
+          </Link>
+          <div className="text-[11px] text-muted-foreground">{row.category}</div>
+        </div>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Alert Status',
+      render: (row) =>
+        row.stock <= 0 ? (
+          <span className="inline-flex items-center gap-1 rounded border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-[11px] font-mono font-semibold text-destructive">
+            OUT OF STOCK
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 rounded border border-warning/40 bg-warning/15 px-2 py-0.5 text-[11px] font-mono font-semibold text-warning">
+            BELOW THRESHOLD
+          </span>
+        ),
+    },
+    {
+      key: 'stock',
+      header: 'Current Stock',
+      align: 'right',
+      render: (row) => (
+        <span
+          className={`font-mono font-semibold tabular-nums ${
+            row.stock <= 0 ? 'text-destructive' : 'text-warning'
+          }`}
+        >
+          {row.stock} {row.unit}
+        </span>
+      ),
+    },
+    {
+      key: 'threshold',
+      header: 'Defined Threshold',
+      align: 'right',
+      render: (row) => {
+        const effectiveThreshold =
+          thresholdMode === 'custom' ? parsedCustomThreshold : row.lowStockAt;
+        return (
+          <div className="text-right">
+            <span className="font-mono text-xs tabular-nums text-foreground">
+              ≤ {effectiveThreshold} {row.unit}
+            </span>
+            {thresholdMode === 'custom' && row.lowStockAt !== parsedCustomThreshold && (
+              <div className="text-[10px] font-mono text-muted-foreground">
+                Item default: {row.lowStockAt}
+              </div>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      key: 'deficit',
+      header: 'Suggested Reorder',
+      align: 'right',
+      render: (row) => {
+        const effectiveThreshold =
+          thresholdMode === 'custom' ? parsedCustomThreshold : row.lowStockAt;
+        const reorderQty = Math.max(1, effectiveThreshold - row.stock + 1);
+        const estCost = reorderQty * row.costPrice;
+        return (
+          <div className="text-right">
+            <div className="font-mono text-xs font-semibold text-primary tabular-nums">
+              +{reorderQty} {row.unit}
+            </div>
+            <div className="text-[11px] font-mono text-muted-foreground tabular-nums">
+              Est. {formatBDT(estCost)}
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      align: 'right',
+      render: (row) => (
+        <div className="flex items-center justify-end gap-1.5">
+          <Link to={`/app/products/${row._id}`}>
+            <Button variant="outline" size="sm" className="h-7 px-2 text-xs">
+              Inspect
+              <ArrowUpRight className="h-3 w-3" />
+            </Button>
+          </Link>
+          <Link to="/app/purchases">
+            <Button variant="secondary" size="sm" className="h-7 px-2 text-xs">
+              <ShoppingCart className="h-3 w-3" />
+              Restock
+            </Button>
+          </Link>
+        </div>
+      ),
+    },
+  ];
+
   const items = data?.data ?? [];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl font-bold tracking-tight">
-            Alerts & Notifications Feed
+            Alerts & Inventory Watchlist
           </h1>
           <p className="text-xs text-muted-foreground">
-            Real-time low-stock triggers, Baki due reminders, and subscription updates.
+            Automatic low-stock threshold detection, reorder calculations, and real-time shop
+            notifications.
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={markAllReadMutation.isPending || items.every((i) => i.isRead)}
-          onClick={() => markAllReadMutation.mutate()}
-        >
-          <CheckCheck className="h-3.5 w-3.5" />
-          Mark All Read
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportLowStockCsv}
+            disabled={filteredLowStockProducts.length === 0}
+          >
+            <Download className="h-3.5 w-3.5" />
+            Export Low-Stock CSV
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={isOffline || markAllReadMutation.isPending || items.every((i) => i.isRead)}
+            onClick={() => markAllReadMutation.mutate()}
+          >
+            <CheckCheck className="h-3.5 w-3.5" />
+            Mark All Alerts Read
+          </Button>
+        </div>
       </div>
 
-      {isLoading ? (
-        <div className="text-xs text-muted-foreground">Loading alerts...</div>
-      ) : items.length === 0 ? (
-        <EmptyState
-          title="No alerts right now — nice."
-          description="Low-stock thresholds and Baki reminders will appear here automatically."
-        />
-      ) : (
-        <div className="space-y-3">
-          {items.map((item) => (
-            <Card
-              key={item._id}
-              className={`p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
-                item.isRead ? 'opacity-75' : 'border-primary/50'
+      {/* Dedicated Low-Stock Inventory Section */}
+      <section aria-labelledby="low-stock-heading" className="space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-border pb-3">
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2">
+              <PackageMinus className="h-4 w-4 text-warning" />
+              <h2 id="low-stock-heading" className="font-display text-lg font-bold tracking-tight">
+                Low-Stock Inventory Watchlist
+              </h2>
+              <span className="rounded border border-border bg-secondary px-2 py-0.5 font-mono text-xs font-semibold tabular-nums">
+                {watchlistSummary.totalFlagged} Flagged
+              </span>
+              {lowStockData?.fromCache && (
+                <span className="inline-flex items-center gap-1 rounded border border-warning/40 bg-warning/15 px-2 py-0.5 font-mono text-[11px] text-warning">
+                  <CloudOff className="h-3 w-3" />
+                  Offline Snapshot
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Automatically identifies active products whose stock quantity is at or below the
+              defined reorder threshold.
+            </p>
+          </div>
+
+          {/* Threshold Mode Selector & Custom Threshold Input */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex items-center rounded-md border border-border bg-card p-0.5 text-xs">
+              <button
+                type="button"
+                onClick={() => setThresholdMode('product')}
+                className={`px-2.5 py-1 rounded-sm font-medium transition-colors cursor-pointer ${
+                  thresholdMode === 'product'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                Per-Product Threshold
+              </button>
+              <button
+                type="button"
+                onClick={() => setThresholdMode('custom')}
+                className={`px-2.5 py-1 rounded-sm font-medium transition-colors cursor-pointer flex items-center gap-1 ${
+                  thresholdMode === 'custom'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <SlidersHorizontal className="h-3 w-3" />
+                Custom Threshold
+              </button>
+            </div>
+
+            {thresholdMode === 'custom' && (
+              <div className="flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1">
+                <Label
+                  htmlFor="custom-stock-threshold"
+                  className="text-xs text-muted-foreground whitespace-nowrap"
+                >
+                  Stock ≤
+                </Label>
+                <Input
+                  id="custom-stock-threshold"
+                  type="number"
+                  min={0}
+                  max={10000}
+                  value={customThresholdInput}
+                  onChange={(e) => setCustomThresholdInput(e.target.value)}
+                  className="h-6 w-16 px-1.5 py-0 font-mono text-xs tabular-nums"
+                />
+                <div className="flex items-center gap-1 pl-1 border-l border-border">
+                  {[5, 10, 20].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setCustomThresholdInput(String(preset))}
+                      className={`px-1.5 py-0.5 rounded text-[11px] font-mono cursor-pointer ${
+                        parsedCustomThreshold === preset
+                          ? 'bg-secondary font-semibold text-foreground'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      ≤{preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Summary KPI Strip */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <Card className="p-4">
+            <div className="text-xs text-muted-foreground">Flagged Inventory Items</div>
+            <div className="mt-1 flex items-baseline justify-between">
+              <span className="font-mono text-2xl font-bold tabular-nums text-foreground">
+                {watchlistSummary.totalFlagged}
+              </span>
+              <span className="text-[11px] font-mono text-muted-foreground">
+                {thresholdMode === 'custom'
+                  ? `Stock ≤ ${parsedCustomThreshold} units`
+                  : 'Stock ≤ item lowStockAt'}
+              </span>
+            </div>
+          </Card>
+
+          <Card className="p-4">
+            <div className="text-xs text-muted-foreground">Out of Stock (0 Qty)</div>
+            <div className="mt-1 flex items-baseline justify-between">
+              <span
+                className={`font-mono text-2xl font-bold tabular-nums ${
+                  watchlistSummary.outOfStockCount > 0 ? 'text-destructive' : 'text-foreground'
+                }`}
+              >
+                {watchlistSummary.outOfStockCount}
+              </span>
+              <span className="text-[11px] font-mono text-destructive">Immediate action</span>
+            </div>
+          </Card>
+
+          <Card className="p-4">
+            <div className="text-xs text-muted-foreground">Critical Low (&gt; 0 Qty)</div>
+            <div className="mt-1 flex items-baseline justify-between">
+              <span
+                className={`font-mono text-2xl font-bold tabular-nums ${
+                  watchlistSummary.criticalLowCount > 0 ? 'text-warning' : 'text-foreground'
+                }`}
+              >
+                {watchlistSummary.criticalLowCount}
+              </span>
+              <span className="text-[11px] font-mono text-warning">Near depletion</span>
+            </div>
+          </Card>
+
+          <Card className="p-4">
+            <div className="text-xs text-muted-foreground">Est. Restock Requirement</div>
+            <div className="mt-1 flex items-baseline justify-between">
+              <span className="font-mono text-2xl font-bold tabular-nums text-primary">
+                {formatBDT(watchlistSummary.estimatedRestockCostBdt)}
+              </span>
+              <span className="text-[11px] font-mono text-muted-foreground tabular-nums">
+                +{watchlistSummary.totalShortageUnits} units
+              </span>
+            </div>
+          </Card>
+        </div>
+
+        {/* Search & Severity Filter Controls */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="relative max-w-sm w-full">
+            <Search className="h-3.5 w-3.5 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Filter low-stock by name, SKU, or category..."
+              className="pl-8 h-8 text-xs"
+            />
+          </div>
+
+          <div className="flex items-center gap-1.5 text-xs">
+            <button
+              type="button"
+              onClick={() => setSeverityFilter('all')}
+              className={`px-2.5 py-1 rounded border font-mono text-xs cursor-pointer ${
+                severityFilter === 'all'
+                  ? 'border-primary bg-primary text-primary-foreground'
+                  : 'border-border bg-card text-muted-foreground hover:text-foreground'
               }`}
             >
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Bell className="h-3.5 w-3.5 text-primary" />
-                  <span className="uppercase font-mono">{item.type.replace('_', ' ')}</span>
-                  <span aria-hidden="true">·</span>
-                  <span className="tabular-nums">{formatDateDhaka(item.createdAt)}</span>
+              All ({watchlistSummary.totalFlagged})
+            </button>
+            <button
+              type="button"
+              onClick={() => setSeverityFilter('out')}
+              className={`px-2.5 py-1 rounded border font-mono text-xs cursor-pointer ${
+                severityFilter === 'out'
+                  ? 'border-destructive bg-destructive text-white'
+                  : 'border-border bg-card text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Out of Stock ({watchlistSummary.outOfStockCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => setSeverityFilter('low')}
+              className={`px-2.5 py-1 rounded border font-mono text-xs cursor-pointer ${
+                severityFilter === 'low'
+                  ? 'border-warning bg-warning text-white'
+                  : 'border-border bg-card text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Below Threshold ({watchlistSummary.criticalLowCount})
+            </button>
+          </div>
+        </div>
+
+        <DataTable
+          columns={lowStockColumns}
+          data={filteredLowStockProducts}
+          rowKey={(row) => row._id}
+          loading={isLowStockLoading}
+          emptyTitle="All inventory items are stocked above threshold"
+          emptyDescription={
+            thresholdMode === 'custom'
+              ? `No active products have stock quantities at or below ${parsedCustomThreshold} units.`
+              : 'Every active product in your catalog currently exceeds its defined low-stock reorder point.'
+          }
+        />
+      </section>
+
+      {/* Real-time Notification Feed */}
+      <section aria-labelledby="notifications-feed-heading" className="space-y-4">
+        <div className="border-b border-border pb-2">
+          <h2
+            id="notifications-feed-heading"
+            className="font-display text-lg font-bold tracking-tight"
+          >
+            Activity & System Notifications Feed
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Chronological log of triggered low-stock alerts, Baki due reminders, and billing events.
+          </p>
+        </div>
+
+        {isLoading ? (
+          <div className="text-xs text-muted-foreground">Loading alerts...</div>
+        ) : items.length === 0 ? (
+          <EmptyState
+            title="No notifications in feed"
+            description="Low-stock triggers and Baki reminders will appear here automatically."
+          />
+        ) : (
+          <div className="space-y-3">
+            {items.map((item) => (
+              <Card
+                key={item._id}
+                className={`p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                  item.isRead ? 'opacity-75' : 'border-primary/50'
+                }`}
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Bell className="h-3.5 w-3.5 text-primary" />
+                    <span className="uppercase font-mono">{item.type.replace('_', ' ')}</span>
+                    <span aria-hidden="true">·</span>
+                    <span className="tabular-nums">{formatDateDhaka(item.createdAt)}</span>
+                    {!item.isRead && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span className="text-primary font-semibold">UNREAD</span>
+                      </>
+                    )}
+                  </div>
+                  <h3 className="font-display text-sm font-semibold text-foreground">
+                    {item.title}
+                  </h3>
+                  <p className="text-xs text-muted-foreground">{item.body}</p>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <Link to={item.link}>
+                    <Button variant="outline" size="sm">
+                      Open Ledger
+                    </Button>
+                  </Link>
                   {!item.isRead && (
-                    <>
-                      <span aria-hidden="true">·</span>
-                      <span className="text-primary font-semibold">UNREAD</span>
-                    </>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => markReadMutation.mutate(item._id)}
+                    >
+                      Mark Read
+                    </Button>
                   )}
                 </div>
-                <h3 className="font-display text-sm font-semibold text-foreground">
-                  {item.title}
-                </h3>
-                <p className="text-xs text-muted-foreground">{item.body}</p>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                <Link to={item.link}>
-                  <Button variant="outline" size="sm">
-                    Open Ledger
-                  </Button>
-                </Link>
-                {!item.isRead && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => markReadMutation.mutate(item._id)}
-                  >
-                    Mark Read
-                  </Button>
-                )}
-              </div>
-            </Card>
-          ))}
-        </div>
-      )}
+              </Card>
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }
