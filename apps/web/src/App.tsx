@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useAuthStore } from '@/stores/authStore';
@@ -6,14 +6,23 @@ import { tryRefreshSession } from '@/lib/api';
 import { AppShell } from '@/components/AppShell';
 import { LandingPage } from '@/routes/LandingPage';
 import { LoginPage, RegisterPage } from '@/routes/AuthPages';
-import { DashboardPage } from '@/routes/DashboardPage';
-import { PosPage } from '@/routes/PosPage';
-import { SalesListPage } from '@/routes/SalesListPage';
-import { ProductDetailPage, ProductsListPage } from '@/routes/ProductsPages';
-import { PurchasesPage, SuppliersPage } from '@/routes/PurchasesAndSuppliersPages';
-import { DuesPage } from '@/routes/DuesPage';
-import { AlertsPage, BillingPage } from '@/routes/AlertsAndBillingPages';
-import { SettingsPage, StaffPage } from '@/routes/StaffAndSettingsPages';
+
+const DashboardPage = lazy(() => import('@/routes/DashboardPage').then((m) => ({ default: m.DashboardPage })));
+const PosPage = lazy(() => import('@/routes/PosPage').then((m) => ({ default: m.PosPage })));
+const SalesListPage = lazy(() => import('@/routes/SalesListPage').then((m) => ({ default: m.SalesListPage })));
+const ProductsListPage = lazy(() => import('@/routes/ProductsPages').then((m) => ({ default: m.ProductsListPage })));
+const ProductDetailPage = lazy(() => import('@/routes/ProductsPages').then((m) => ({ default: m.ProductDetailPage })));
+const PurchasesPage = lazy(() => import('@/routes/PurchasesAndSuppliersPages').then((m) => ({ default: m.PurchasesPage })));
+const SuppliersPage = lazy(() => import('@/routes/PurchasesAndSuppliersPages').then((m) => ({ default: m.SuppliersPage })));
+const DuesPage = lazy(() => import('@/routes/DuesPage').then((m) => ({ default: m.DuesPage })));
+const AlertsPage = lazy(() => import('@/routes/AlertsAndBillingPages').then((m) => ({ default: m.AlertsPage })));
+const BillingPage = lazy(() => import('@/routes/AlertsAndBillingPages').then((m) => ({ default: m.BillingPage })));
+const SettingsPage = lazy(() => import('@/routes/StaffAndSettingsPages').then((m) => ({ default: m.SettingsPage })));
+const StaffPage = lazy(() => import('@/routes/StaffAndSettingsPages').then((m) => ({ default: m.StaffPage })));
+
+function RouteLoading(): React.ReactElement {
+  return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -52,14 +61,19 @@ function ProtectedAppRoutes(): React.ReactElement {
     return <Navigate to="/login" replace />;
   }
 
-  return <AppShell />;
+  return (
+    <Suspense fallback={<RouteLoading />}>
+      <AppShell />
+    </Suspense>
+  );
 }
 
 export default function App(): React.ReactElement {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <Routes>
+        <Suspense fallback={<RouteLoading />}>
+          <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
@@ -81,7 +95,8 @@ export default function App(): React.ReactElement {
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+          </Routes>
+        </Suspense>
       </BrowserRouter>
     </QueryClientProvider>
   );

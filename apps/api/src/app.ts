@@ -4,7 +4,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import type { HealthResponse } from '@dokanos/shared';
 import { env } from './config/env.js';
-import { globalRateLimiter } from './middleware/rateLimit.js';
+import { globalRateLimiter, authRateLimiter } from './middleware/rateLimit.js';
 import { errorHandler, notFoundHandler } from './middleware/error.js';
 import { authRouter } from './modules/auth/routes.js';
 import { tenantsRouter } from './modules/tenants/routes.js';
@@ -22,14 +22,12 @@ import { jobsRouter } from './queues/worker.js';
 
 export function createApiApp(): Express {
   const app = express();
+  app.set('trust proxy', 1);
 
-  const allowedOrigins = new Set<string>([
-    env.FRONTEND_URL,
-    'http://localhost:5173',
-    'http://localhost:3000',
-  ]);
-  if (process.env.APP_URL) {
-    allowedOrigins.add(process.env.APP_URL);
+  const allowedOrigins = new Set<string>([env.FRONTEND_URL]);
+  if (env.NODE_ENV !== 'production') {
+    allowedOrigins.add('http://localhost:5173');
+    allowedOrigins.add('http://localhost:3000');
   }
 
   app.use(
@@ -70,7 +68,10 @@ export function createApiApp(): Express {
     res.status(200).json(response);
   });
 
-  // Mount all /api/v1 routes
+  // Apply stricter auth limiting outside test runs.
+  if (env.NODE_ENV !== 'test') {
+    app.use('/api/v1/auth', authRateLimiter);
+  }
   app.use('/api/v1/auth', authRouter);
   app.use('/api/v1/tenants', tenantsRouter);
   app.use('/api/v1/users', usersRouter);
