@@ -9,6 +9,8 @@ export interface StatCardProps {
   subtext?: string;
   tone?: 'default' | 'primary' | 'warning' | 'danger';
   loading?: boolean;
+  badge?: React.ReactNode;
+  footer?: React.ReactNode;
 }
 
 export function StatCard({
@@ -17,6 +19,8 @@ export function StatCard({
   subtext,
   tone = 'default',
   loading = false,
+  badge,
+  footer,
 }: StatCardProps): React.ReactElement {
   const toneClass =
     tone === 'primary'
@@ -29,7 +33,10 @@ export function StatCard({
 
   return (
     <Card className="p-5 flex flex-col justify-between">
-      <div className="text-xs font-medium text-muted-foreground">{label}</div>
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-xs font-medium text-muted-foreground">{label}</div>
+        {!loading && badge}
+      </div>
       {loading ? (
         <div className="space-y-2 mt-3">
           <Skeleton className="h-8 w-32" />
@@ -41,8 +48,10 @@ export function StatCard({
             {value}
           </div>
           {subtext && <div className="text-xs text-muted-foreground">{subtext}</div>}
+          {footer && <div className="pt-1.5 border-t border-border/70 mt-2">{footer}</div>}
         </div>
       )}
     </Card>
   );
 }
+

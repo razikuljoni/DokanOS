@@ -272,7 +272,9 @@ export async function seedDemoData(forceReset = false): Promise<void> {
   for (let i = 1; i <= 120; i++) {
     const dueSpec = customerDueIndices.get(i);
     const daysAgo = dueSpec ? dueSpec.daysAgo : Math.floor(((120 - i) / 120) * 29);
-    const saleDate = new Date(now - daysAgo * dayMs - (i % 8) * 3600 * 1000);
+    const intraDayOffsetMs =
+      daysAgo <= 1 ? (i % 4) * 5 * 60 * 1000 : (i % 8) * 3600 * 1000;
+    const saleDate = new Date(now - daysAgo * dayMs - intraDayOffsetMs);
 
     const p1 = productDocs[(i * 3) % productDocs.length]!;
     const p2 = productDocs[(i * 7 + 5) % productDocs.length]!;

@@ -15,7 +15,14 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { ArrowRight, CloudOff, Plus } from 'lucide-react';
+import {
+  ArrowRight,
+  CloudOff,
+  Minus,
+  Plus,
+  TrendingDown,
+  TrendingUp,
+} from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useIsOffline } from '@/stores/offlineStore';
 import { apiFetch, ApiClientError } from '@/lib/api';
@@ -35,6 +42,11 @@ interface DashboardSummary {
   profit: number;
   salesCount: number;
   averageBill: number;
+  todaySales?: number;
+  yesterdaySales?: number;
+  todaySalesCount?: number;
+  yesterdaySalesCount?: number;
+  salesGrowthPercent?: number;
   topProducts: Array<{
     productId: string;
     name: string;
@@ -126,6 +138,35 @@ export function DashboardPage(): React.ReactElement {
   const summary = summaryRes?.data;
   const trend = trendRes?.data ?? [];
 
+  // Resolve Today's Total Sales vs Yesterday's Total Sales (with fallback to trend series if cached)
+  const dhakaDateFmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Dhaka',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const nowDate = new Date();
+  const todayDhakaStr = dhakaDateFmt.format(nowDate);
+  const yesterdayDhakaStr = dhakaDateFmt.format(
+    new Date(nowDate.getTime() - 24 * 60 * 60 * 1000),
+  );
+
+  const todayTrendPoint = trend.find((pt) => pt.date === todayDhakaStr);
+  const yesterdayTrendPoint = trend.find((pt) => pt.date === yesterdayDhakaStr);
+
+  const todaySales = summary?.todaySales ?? todayTrendPoint?.revenue ?? 0;
+  const yesterdaySales = summary?.yesterdaySales ?? yesterdayTrendPoint?.revenue ?? 0;
+  const todaySalesCount = summary?.todaySalesCount ?? todayTrendPoint?.orders ?? 0;
+  const yesterdaySalesCount = summary?.yesterdaySalesCount ?? yesterdayTrendPoint?.orders ?? 0;
+  const salesGrowthPercent =
+    summary?.salesGrowthPercent ??
+    (yesterdaySales > 0
+      ? Number((((todaySales - yesterdaySales) / yesterdaySales) * 100).toFixed(1))
+      : todaySales > 0
+        ? 100
+        : 0);
+  const salesDelta = Number((todaySales - yesterdaySales).toFixed(2));
+
   const recentSaleColumns: DataTableColumn<DashboardSummary['recentSales'][number]>[] = [
     {
       key: 'invoiceNo',
@@ -216,8 +257,64 @@ export function DashboardPage(): React.ReactElement {
       {/* Low Stock Banner */}
       {summary && <LowStockBanner count={summary.lowStockCount} />}
 
-      {/* 4 KPI Stat Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* KPI Summary Cards (including Today's Total Sales vs Yesterday's Total Sales) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <StatCard
+          label="Today's Total Sales"
+          value={formatBDT(todaySales)}
+          subtext={`${todaySalesCount} invoice(s) settled today`}
+          tone="primary"
+          loading={summaryLoading}
+          badge={
+            <span
+              data-testid="sales-growth-indicator"
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] font-mono font-semibold tabular-nums ${
+                salesGrowthPercent > 0
+                  ? 'border-primary/30 bg-primary/10 text-primary'
+                  : salesGrowthPercent < 0
+                    ? 'border-destructive/30 bg-destructive/10 text-destructive'
+                    : 'border-border bg-secondary text-muted-foreground'
+              }`}
+              title="Percentage growth vs Yesterday's Total Sales"
+            >
+              {salesGrowthPercent > 0 ? (
+                <TrendingUp className="h-3 w-3 shrink-0" />
+              ) : salesGrowthPercent < 0 ? (
+                <TrendingDown className="h-3 w-3 shrink-0" />
+              ) : (
+                <Minus className="h-3 w-3 shrink-0" />
+              )}
+              <span>
+                {salesGrowthPercent > 0 ? '+' : ''}
+                {salesGrowthPercent.toFixed(1)}%
+              </span>
+            </span>
+          }
+          footer={
+            <div className="space-y-0.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Yesterday&apos;s Total Sales</span>
+                <span className="font-mono font-semibold tabular-nums text-foreground">
+                  {formatBDT(yesterdaySales)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                <span>{yesterdaySalesCount} invoice(s) yesterday</span>
+                <span
+                  className={`font-mono tabular-nums ${
+                    salesDelta > 0
+                      ? 'text-primary font-medium'
+                      : salesDelta < 0
+                        ? 'text-destructive font-medium'
+                        : 'text-muted-foreground'
+                  }`}
+                >
+                  {salesDelta >= 0 ? `+${formatBDT(salesDelta)}` : `−${formatBDT(Math.abs(salesDelta))}`}
+                </span>
+              </div>
+            </div>
+          }
+        />
         <StatCard
           label="Total Revenue (30d)"
           value={formatBDT(summary?.revenue ?? 0)}

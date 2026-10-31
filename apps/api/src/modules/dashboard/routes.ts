@@ -43,6 +43,18 @@ dashboardRouter.get('/summary', requirePermission('dashboard:read'), async (req,
       saleMatch.createdAt = createdAt;
     }
 
+    const dhakaDateFmt = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Dhaka',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const nowDate = new Date();
+    const todayDhaka = dhakaDateFmt.format(nowDate);
+    const yesterdayDhaka = dhakaDateFmt.format(
+      new Date(nowDate.getTime() - 24 * 60 * 60 * 1000),
+    );
+
     const [
       revenueAgg,
       profitAgg,
@@ -52,6 +64,7 @@ dashboardRouter.get('/summary', requirePermission('dashboard:read'), async (req,
       receivableAgg,
       payableAgg,
       recentSales,
+      dailyComparisonAgg,
     ] = await Promise.all([
       // 1. Revenue, salesCount, averageBill
       SaleModel.aggregate<{
@@ -175,6 +188,36 @@ dashboardRouter.get('/summary', requirePermission('dashboard:read'), async (req,
         .sort({ createdAt: -1 })
         .limit(6)
         .lean(),
+
+      // 9. Today's Total Sales vs Yesterday's Total Sales (Asia/Dhaka timezone)
+      SaleModel.aggregate<{
+        _id: string;
+        totalSales: number;
+        salesCount: number;
+      }>([
+        {
+          $match: {
+            tenantId: tenantObjectId,
+            isReturned: false,
+            createdAt: {
+              $gte: new Date(nowDate.getTime() - 72 * 60 * 60 * 1000),
+            },
+          },
+        },
+        {
+          $group: {
+            _id: {
+              $dateToString: {
+                format: '%Y-%m-%d',
+                date: '$createdAt',
+                timezone: 'Asia/Dhaka',
+              },
+            },
+            totalSales: { $sum: '$total' },
+            salesCount: { $sum: 1 },
+          },
+        },
+      ]),
     ]);
 
     const revStats = revenueAgg[0] ?? { revenue: 0, salesCount: 0, averageBill: 0 };
@@ -185,11 +228,29 @@ dashboardRouter.get('/summary', requirePermission('dashboard:read'), async (req,
     const receivable = Number((receivableAgg[0]?.totalReceivable ?? 0).toFixed(2));
     const payable = Number((payableAgg[0]?.totalPayable ?? 0).toFixed(2));
 
+    const todayBucket = dailyComparisonAgg.find((d) => d._id === todayDhaka);
+    const yesterdayBucket = dailyComparisonAgg.find((d) => d._id === yesterdayDhaka);
+    const todaySales = Number((todayBucket?.totalSales ?? 0).toFixed(2));
+    const yesterdaySales = Number((yesterdayBucket?.totalSales ?? 0).toFixed(2));
+    const todaySalesCount = todayBucket?.salesCount ?? 0;
+    const yesterdaySalesCount = yesterdayBucket?.salesCount ?? 0;
+    const salesGrowthPercent =
+      yesterdaySales > 0
+        ? Number((((todaySales - yesterdaySales) / yesterdaySales) * 100).toFixed(1))
+        : todaySales > 0
+          ? 100
+          : 0;
+
     const summaryData = {
       revenue,
       profit,
       salesCount: revStats.salesCount ?? 0,
       averageBill,
+      todaySales,
+      yesterdaySales,
+      todaySalesCount,
+      yesterdaySalesCount,
+      salesGrowthPercent,
       topProducts: topProductsAgg,
       salesByCategory: categorySalesAgg,
       lowStockCount,
