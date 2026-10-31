@@ -799,10 +799,10 @@ export function SettingsPage(): React.ReactElement {
             <span aria-hidden="true">/</span>
             <span className="font-semibold text-foreground">OUTLET &amp; TEAM</span>
             <span
-              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-sans font-semibold ${
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-sans font-semibold ${
                 isOffline
-                  ? 'bg-warning/15 text-warning border border-warning/30'
-                  : 'bg-primary/15 text-primary border border-primary/25'
+                  ? 'bg-warning/15 text-warning border-warning/30'
+                  : 'bg-primary/15 text-primary border-primary/25'
               }`}
             >
               <span
@@ -835,11 +835,7 @@ export function SettingsPage(): React.ReactElement {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-          <button
-            type="button"
-            onClick={scrollToAuditLog}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3.5 py-2 text-xs font-semibold text-foreground hover:bg-secondary transition-colors cursor-pointer"
-          >
+          <Button type="button" variant="outline" size="sm" onClick={scrollToAuditLog}>
             <History className="h-3.5 w-3.5 text-muted-foreground" />
             <span>Audit Log</span>
             {auditLogs.length > 0 && (
@@ -847,49 +843,48 @@ export function SettingsPage(): React.ReactElement {
                 {auditLogs.length}
               </span>
             )}
-          </button>
+          </Button>
 
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={handleDiscardChanges}
             disabled={!isProfileDirty || saveSettingsMutation.isPending}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3.5 py-2 text-xs font-semibold text-foreground hover:bg-secondary transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <span>Discard Changes</span>
-          </button>
+          </Button>
 
-          <button
+          <Button
             type="button"
+            size="sm"
             onClick={() => saveSettingsMutation.mutate()}
             disabled={!canWriteTenant || saveSettingsMutation.isPending || !shopName.trim()}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Check className="h-3.5 w-3.5" />
             <span>{saveSettingsMutation.isPending ? 'Saving...' : 'Save All Changes'}</span>
-          </button>
+          </Button>
         </div>
       </div>
 
       {/* Section 1: Shop & Outlet Profile Card (Stitch Section 1 + Live /api/v1/tenants/me) */}
-      <section
+      <Card
         aria-labelledby="shop-profile-heading"
-        className="rounded-xl border border-border bg-card text-card-foreground p-6 space-y-6"
+        className="rounded-xl border border-border bg-card text-card-foreground"
       >
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border pb-4">
+        <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border pb-4 space-y-0">
           <div className="space-y-0.5">
-            <div className="flex items-center gap-2">
+            <CardTitle
+              id="shop-profile-heading"
+              className="flex items-center gap-2 text-base font-bold text-foreground"
+            >
               <Store className="h-4 w-4 text-primary" />
-              <h2
-                id="shop-profile-heading"
-                className="font-display text-base font-bold text-foreground"
-              >
-                Shop &amp; Outlet Profile
-              </h2>
-            </div>
-            <p className="text-xs text-muted-foreground">
+              <span>Shop &amp; Outlet Profile</span>
+            </CardTitle>
+            <CardDescription className="text-xs text-muted-foreground">
               Official tax, contact, and operational details for printed invoices, VAT challans, and
               DGDA regulatory registers.
-            </p>
+            </CardDescription>
           </div>
 
           <div className="flex items-center gap-2 self-start sm:self-auto">
@@ -898,280 +893,284 @@ export function SettingsPage(): React.ReactElement {
               {liveTenant?.settings.currency ?? tenant?.settings.currency ?? 'BDT'}
             </span>
           </div>
-        </div>
+        </CardHeader>
 
-        {isTenantLoading ? (
-          <div className="text-xs text-muted-foreground py-4">
-            Loading live shop profile from <code>GET /api/v1/tenants/me</code>...
-          </div>
-        ) : tenantError ? (
-          <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-xs text-destructive">
-            <strong>Role Restriction / API Error on GET /api/v1/tenants/me:</strong>{' '}
-            {formatErrorMessage(tenantError)}
-          </div>
-        ) : (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-              {/* Row 1 Col 1: Registered Shop Name (LIVE: name) */}
-              <div className="space-y-1.5">
-                <Label
-                  htmlFor="set-name"
-                  className="text-[10px] font-mono uppercase tracking-wider font-semibold text-muted-foreground"
-                >
-                  REGISTERED SHOP NAME <span className="text-destructive">*</span>
-                </Label>
-                <div className="relative">
-                  <Input
-                    id="set-name"
-                    value={shopName}
+        <CardContent className="pt-6 space-y-6">
+          {isTenantLoading ? (
+            <div className="text-xs text-muted-foreground py-4">
+              Loading live shop profile from <code>GET /api/v1/tenants/me</code>...
+            </div>
+          ) : tenantError ? (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-xs text-destructive">
+              <strong>Role Restriction / API Error on GET /api/v1/tenants/me:</strong>{' '}
+              {formatErrorMessage(tenantError)}
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                {/* Row 1 Col 1: Registered Shop Name (LIVE: name) */}
+                <div className="space-y-1.5">
+                  <Label
+                    htmlFor="set-name"
+                    className="text-[10px] font-mono uppercase tracking-wider font-semibold text-muted-foreground"
+                  >
+                    REGISTERED SHOP NAME <span className="text-destructive">*</span>
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="set-name"
+                      value={shopName}
+                      disabled={!canWriteTenant}
+                      onChange={(e) => setShopName(e.target.value)}
+                      className="pr-8 bg-card border-input text-foreground text-xs font-medium"
+                    />
+                    <CheckCircle2
+                      className="h-4 w-4 text-primary absolute right-2.5 top-1/2 -translate-y-1/2"
+                      aria-label="Live connected field"
+                    />
+                  </div>
+                </div>
+
+                {/* Row 1 Col 2: Retail Classification (LIVE: type) */}
+                <div className="space-y-1.5">
+                  <Label
+                    htmlFor="set-type"
+                    className="text-[10px] font-mono uppercase tracking-wider font-semibold text-muted-foreground"
+                  >
+                    RETAIL CLASSIFICATION
+                  </Label>
+                  <select
+                    id="set-type"
+                    value={shopType}
                     disabled={!canWriteTenant}
-                    onChange={(e) => setShopName(e.target.value)}
-                    className="pr-8 bg-card border-input text-foreground text-xs font-medium"
+                    onChange={(e) => setShopType(e.target.value as ShopType)}
+                    className="flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                  >
+                    {SHOP_TYPES.map((t) => (
+                      <option key={t} value={t} className="bg-card text-foreground">
+                        {SHOP_TYPE_LABELS[t]} ({t})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Row 1 Col 3: Default Low-Stock Threshold (LIVE: settings.lowStockThreshold) */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label
+                      htmlFor="set-low"
+                      className="text-[10px] font-mono uppercase tracking-wider font-semibold text-muted-foreground"
+                    >
+                      DEFAULT LOW-STOCK THRESHOLD
+                    </Label>
+                    <span className="rounded border border-primary/25 bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary">
+                      Live Setting
+                    </span>
+                  </div>
+                  <Input
+                    id="set-low"
+                    type="number"
+                    min={0}
+                    max={10000}
+                    disabled={!canWriteTenant}
+                    value={threshold}
+                    onChange={(e) => setThreshold(Number(e.target.value))}
+                    className="bg-card border-input text-foreground font-mono text-xs tabular-nums"
                   />
-                  <CheckCircle2
-                    className="h-4 w-4 text-primary absolute right-2.5 top-1/2 -translate-y-1/2"
-                    aria-label="Live connected field"
+                </div>
+
+                {/* Row 2 Col 1: Physical Location & Holding (UNCONNECTED in backend schema) */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label
+                      htmlFor="set-location-unconnected"
+                      className="text-[10px] font-mono uppercase tracking-wider font-semibold text-muted-foreground"
+                    >
+                      PHYSICAL LOCATION &amp; HOLDING
+                    </Label>
+                    <span className="rounded border border-warning/30 bg-warning/15 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-warning">
+                      Unconnected
+                    </span>
+                  </div>
+                  <Input
+                    id="set-location-unconnected"
+                    value=""
+                    placeholder="Unconnected — address field not in Tenant schema"
+                    disabled
+                    readOnly
+                    className="bg-secondary/50 border-border text-xs text-muted-foreground"
+                  />
+                </div>
+
+                {/* Row 2 Col 2: Official Helpline / SMS Gateway (UNCONNECTED in backend schema) */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label
+                      htmlFor="set-helpline-unconnected"
+                      className="text-[10px] font-mono uppercase tracking-wider font-semibold text-muted-foreground"
+                    >
+                      OFFICIAL HELPLINE / SMS GATEWAY
+                    </Label>
+                    <span className="rounded border border-warning/30 bg-warning/15 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-warning">
+                      NoOp SMS Stub
+                    </span>
+                  </div>
+                  <Input
+                    id="set-helpline-unconnected"
+                    value=""
+                    placeholder="Unconnected — phone/OTP field not in Tenant schema"
+                    disabled
+                    readOnly
+                    className="bg-secondary/50 border-border text-xs text-muted-foreground"
+                  />
+                </div>
+
+                {/* Row 2 Col 3: Trade License & DGDA Reg (UNCONNECTED in backend schema) */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label
+                      htmlFor="set-dgda-unconnected"
+                      className="text-[10px] font-mono uppercase tracking-wider font-semibold text-muted-foreground"
+                    >
+                      TRADE LICENSE &amp; DGDA REG
+                    </Label>
+                    <span className="rounded border border-warning/30 bg-warning/15 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-warning">
+                      Unconnected
+                    </span>
+                  </div>
+                  <Input
+                    id="set-dgda-unconnected"
+                    value=""
+                    placeholder="Unconnected — tradeLicense not in Tenant schema"
+                    disabled
+                    readOnly
+                    className="bg-secondary/50 border-border text-xs text-muted-foreground"
+                  />
+                </div>
+
+                {/* Row 3 Col 1: Base Ledger Currency (LIVE: settings.currency) */}
+                <div className="space-y-1.5">
+                  <Label
+                    htmlFor="set-currency"
+                    className="text-[10px] font-mono uppercase tracking-wider font-semibold text-muted-foreground"
+                  >
+                    BASE LEDGER CURRENCY
+                  </Label>
+                  <Input
+                    id="set-currency"
+                    value={`৳ ${liveTenant?.settings.currency ?? 'BDT'} (৳) - Bangladeshi Taka`}
+                    readOnly
+                    disabled
+                    className="bg-secondary/60 border-border font-mono text-xs text-foreground"
+                  />
+                </div>
+
+                {/* Row 3 Col 2: Fiscal Clock & Timezone (LIVE constant: Asia/Dhaka) */}
+                <div className="space-y-1.5">
+                  <Label
+                    htmlFor="set-timezone"
+                    className="text-[10px] font-mono uppercase tracking-wider font-semibold text-muted-foreground"
+                  >
+                    FISCAL CLOCK &amp; TIMEZONE
+                  </Label>
+                  <Input
+                    id="set-timezone"
+                    value={`${TIMEZONE_DHAKA} (GMT+6)`}
+                    readOnly
+                    disabled
+                    className="bg-secondary/60 border-border font-mono text-xs text-foreground"
+                  />
+                </div>
+
+                {/* Row 3 Col 3: Billing & Audit Email (LIVE authenticated user email + unconnected shift window note) */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label
+                      htmlFor="set-audit-email"
+                      className="text-[10px] font-mono uppercase tracking-wider font-semibold text-muted-foreground"
+                    >
+                      BILLING &amp; AUDIT ACCOUNT EMAIL
+                    </Label>
+                    <span className="font-mono text-[10px] font-semibold text-primary">
+                      {user?.role.toUpperCase() ?? 'AUTH'}
+                    </span>
+                  </div>
+                  <Input
+                    id="set-audit-email"
+                    value={user?.email ?? ''}
+                    readOnly
+                    disabled
+                    className="bg-secondary/60 border-border font-mono text-xs text-foreground"
                   />
                 </div>
               </div>
 
-              {/* Row 1 Col 2: Retail Classification (LIVE: type) */}
-              <div className="space-y-1.5">
-                <Label
-                  htmlFor="set-type"
-                  className="text-[10px] font-mono uppercase tracking-wider font-semibold text-muted-foreground"
+              <div className="pt-4 border-t border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <Clock className="h-3.5 w-3.5 text-primary" />
+                  {isUsageLoading ? (
+                    <span>Loading live usage from GET /api/v1/tenants/me/usage...</span>
+                  ) : usageError ? (
+                    <span className="text-destructive">
+                      Usage error: {formatErrorMessage(usageError)}
+                    </span>
+                  ) : usage ? (
+                    <span className="tabular-nums">
+                      Live Shop Usage:{' '}
+                      <strong className="text-foreground">{usage.productCount}</strong> /{' '}
+                      {usage.maxProducts ?? 'Unlimited'} active products ·{' '}
+                      <strong className="text-foreground">{usage.staffCount}</strong> /{' '}
+                      {usage.maxStaff} active staff ·{' '}
+                      {liveTenant?.updatedAt
+                        ? `Last updated ${formatDateDhaka(liveTenant.updatedAt)}`
+                        : 'Synced with MongoDB'}
+                    </span>
+                  ) : (
+                    <span>Synced with DokanOS tenant ledger</span>
+                  )}
+                </div>
+
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => saveSettingsMutation.mutate()}
+                  disabled={!canWriteTenant || saveSettingsMutation.isPending || !shopName.trim()}
+                  className="self-start sm:self-auto"
                 >
-                  RETAIL CLASSIFICATION
-                </Label>
-                <select
-                  id="set-type"
-                  value={shopType}
-                  disabled={!canWriteTenant}
-                  onChange={(e) => setShopType(e.target.value as ShopType)}
-                  className="flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
-                >
-                  {SHOP_TYPES.map((t) => (
-                    <option key={t} value={t} className="bg-card text-foreground">
-                      {SHOP_TYPE_LABELS[t]} ({t})
-                    </option>
-                  ))}
-                </select>
+                  <Check className="h-3.5 w-3.5" />
+                  <span>{saveSettingsMutation.isPending ? 'Saving...' : 'Save changes'}</span>
+                </Button>
               </div>
-
-              {/* Row 1 Col 3: Default Low-Stock Threshold (LIVE: settings.lowStockThreshold) */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <Label
-                    htmlFor="set-low"
-                    className="text-[10px] font-mono uppercase tracking-wider font-semibold text-muted-foreground"
-                  >
-                    DEFAULT LOW-STOCK THRESHOLD
-                  </Label>
-                  <span className="rounded border border-primary/25 bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary">
-                    Live Setting
-                  </span>
-                </div>
-                <Input
-                  id="set-low"
-                  type="number"
-                  min={0}
-                  max={10000}
-                  disabled={!canWriteTenant}
-                  value={threshold}
-                  onChange={(e) => setThreshold(Number(e.target.value))}
-                  className="bg-card border-input text-foreground font-mono text-xs tabular-nums"
-                />
-              </div>
-
-              {/* Row 2 Col 1: Physical Location & Holding (UNCONNECTED in backend schema) */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <Label
-                    htmlFor="set-location-unconnected"
-                    className="text-[10px] font-mono uppercase tracking-wider font-semibold text-muted-foreground"
-                  >
-                    PHYSICAL LOCATION &amp; HOLDING
-                  </Label>
-                  <span className="rounded border border-warning/30 bg-warning/15 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-warning">
-                    Unconnected
-                  </span>
-                </div>
-                <Input
-                  id="set-location-unconnected"
-                  value=""
-                  placeholder="Unconnected — address field not in Tenant schema"
-                  disabled
-                  readOnly
-                  className="bg-secondary/50 border-border text-xs text-muted-foreground"
-                />
-              </div>
-
-              {/* Row 2 Col 2: Official Helpline / SMS Gateway (UNCONNECTED in backend schema) */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <Label
-                    htmlFor="set-helpline-unconnected"
-                    className="text-[10px] font-mono uppercase tracking-wider font-semibold text-muted-foreground"
-                  >
-                    OFFICIAL HELPLINE / SMS GATEWAY
-                  </Label>
-                  <span className="rounded border border-warning/30 bg-warning/15 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-warning">
-                    NoOp SMS Stub
-                  </span>
-                </div>
-                <Input
-                  id="set-helpline-unconnected"
-                  value=""
-                  placeholder="Unconnected — phone/OTP field not in Tenant schema"
-                  disabled
-                  readOnly
-                  className="bg-secondary/50 border-border text-xs text-muted-foreground"
-                />
-              </div>
-
-              {/* Row 2 Col 3: Trade License & DGDA Reg (UNCONNECTED in backend schema) */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <Label
-                    htmlFor="set-dgda-unconnected"
-                    className="text-[10px] font-mono uppercase tracking-wider font-semibold text-muted-foreground"
-                  >
-                    TRADE LICENSE &amp; DGDA REG
-                  </Label>
-                  <span className="rounded border border-warning/30 bg-warning/15 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-warning">
-                    Unconnected
-                  </span>
-                </div>
-                <Input
-                  id="set-dgda-unconnected"
-                  value=""
-                  placeholder="Unconnected — tradeLicense not in Tenant schema"
-                  disabled
-                  readOnly
-                  className="bg-secondary/50 border-border text-xs text-muted-foreground"
-                />
-              </div>
-
-              {/* Row 3 Col 1: Base Ledger Currency (LIVE: settings.currency) */}
-              <div className="space-y-1.5">
-                <Label
-                  htmlFor="set-currency"
-                  className="text-[10px] font-mono uppercase tracking-wider font-semibold text-muted-foreground"
-                >
-                  BASE LEDGER CURRENCY
-                </Label>
-                <Input
-                  id="set-currency"
-                  value={`৳ ${liveTenant?.settings.currency ?? 'BDT'} (৳) - Bangladeshi Taka`}
-                  readOnly
-                  disabled
-                  className="bg-secondary/60 border-border font-mono text-xs text-foreground"
-                />
-              </div>
-
-              {/* Row 3 Col 2: Fiscal Clock & Timezone (LIVE constant: Asia/Dhaka) */}
-              <div className="space-y-1.5">
-                <Label
-                  htmlFor="set-timezone"
-                  className="text-[10px] font-mono uppercase tracking-wider font-semibold text-muted-foreground"
-                >
-                  FISCAL CLOCK &amp; TIMEZONE
-                </Label>
-                <Input
-                  id="set-timezone"
-                  value={`${TIMEZONE_DHAKA} (GMT+6)`}
-                  readOnly
-                  disabled
-                  className="bg-secondary/60 border-border font-mono text-xs text-foreground"
-                />
-              </div>
-
-              {/* Row 3 Col 3: Billing & Audit Email (LIVE authenticated user email + unconnected shift window note) */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <Label
-                    htmlFor="set-audit-email"
-                    className="text-[10px] font-mono uppercase tracking-wider font-semibold text-muted-foreground"
-                  >
-                    BILLING &amp; AUDIT ACCOUNT EMAIL
-                  </Label>
-                  <span className="font-mono text-[10px] font-semibold text-primary">
-                    {user?.role.toUpperCase() ?? 'AUTH'}
-                  </span>
-                </div>
-                <Input
-                  id="set-audit-email"
-                  value={user?.email ?? ''}
-                  readOnly
-                  disabled
-                  className="bg-secondary/60 border-border font-mono text-xs text-foreground"
-                />
-              </div>
-            </div>
-
-            <div className="pt-4 border-t border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <Clock className="h-3.5 w-3.5 text-primary" />
-                {isUsageLoading ? (
-                  <span>Loading live usage from GET /api/v1/tenants/me/usage...</span>
-                ) : usageError ? (
-                  <span className="text-destructive">
-                    Usage error: {formatErrorMessage(usageError)}
-                  </span>
-                ) : usage ? (
-                  <span className="tabular-nums">
-                    Live Shop Usage: <strong className="text-foreground">{usage.productCount}</strong>{' '}
-                    / {usage.maxProducts ?? 'Unlimited'} active products ·{' '}
-                    <strong className="text-foreground">{usage.staffCount}</strong> / {usage.maxStaff}{' '}
-                    active staff ·{' '}
-                    {liveTenant?.updatedAt
-                      ? `Last updated ${formatDateDhaka(liveTenant.updatedAt)}`
-                      : 'Synced with MongoDB'}
-                  </span>
-                ) : (
-                  <span>Synced with DokanOS tenant ledger</span>
-                )}
-              </div>
-
-              <button
-                type="button"
-                onClick={() => saveSettingsMutation.mutate()}
-                disabled={!canWriteTenant || saveSettingsMutation.isPending || !shopName.trim()}
-                className="inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed self-start sm:self-auto"
-              >
-                <Check className="h-3.5 w-3.5" />
-                <span>{saveSettingsMutation.isPending ? 'Saving...' : 'Save changes'}</span>
-              </button>
-            </div>
-          </>
-        )}
-      </section>
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Section 2: Staff Directory + Invite New Staff Member (Stitch 2-Col Grid, Live /api/v1/users) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left: Staff Directory (8 cols) */}
-        <section
+        <Card
           aria-labelledby="staff-directory-heading"
-          className="lg:col-span-8 rounded-xl border border-border bg-card text-card-foreground p-6 space-y-4"
+          className="lg:col-span-8 rounded-xl border border-border bg-card text-card-foreground"
         >
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 space-y-0">
             <div className="space-y-0.5">
               <div className="flex items-center gap-2">
                 <Users className="h-4 w-4 text-primary" />
-                <h2
+                <CardTitle
                   id="staff-directory-heading"
-                  className="font-display text-base font-bold text-foreground"
+                  className="text-base font-bold text-foreground"
                 >
                   Staff Directory
-                </h2>
+                </CardTitle>
                 <span className="rounded border border-border bg-secondary/60 px-2 py-0.5 font-mono text-[11px] font-semibold text-foreground tabular-nums">
                   {allStaff.length} {allStaff.length === 1 ? 'Member' : 'Members'}
                 </span>
               </div>
-              <p className="text-xs text-muted-foreground">
+              <CardDescription className="text-xs text-muted-foreground">
                 Active POS terminals, shift managers, and registered shop accounts from{' '}
                 <code>GET /api/v1/users</code>.
-              </p>
+              </CardDescription>
             </div>
 
             <div className="flex items-center gap-2">
@@ -1184,181 +1183,182 @@ export function SettingsPage(): React.ReactElement {
                   className="pl-8 h-8 w-44 text-xs bg-background border-input text-foreground"
                 />
               </div>
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                size="sm"
                 onClick={handleExportStaffCsv}
                 disabled={filteredStaff.length === 0}
-                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-secondary transition-colors cursor-pointer disabled:opacity-50"
               >
                 <Download className="h-3.5 w-3.5" />
                 <span>CSV</span>
-              </button>
+              </Button>
             </div>
-          </div>
+          </CardHeader>
 
-          {isUsersLoading ? (
-            <div className="text-xs text-muted-foreground py-6">
-              Loading staff directory from <code>GET /api/v1/users</code>...
-            </div>
-          ) : usersError ? (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-xs text-destructive">
-              <strong>Role Restriction / API Error on GET /api/v1/users:</strong>{' '}
-              {formatErrorMessage(usersError)}
-            </div>
-          ) : (
-            <div className="rounded-lg border border-border overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="bg-secondary/60 border-b border-border font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                    <th className="py-2.5 px-3.5 font-medium">STAFF MEMBER</th>
-                    <th className="py-2.5 px-3 font-medium">ROLE</th>
-                    <th className="py-2.5 px-3 font-medium">OUTLET</th>
-                    <th className="py-2.5 px-3 font-medium">LAST ACTIVE</th>
-                    <th className="py-2.5 px-3 font-medium">STATUS</th>
-                    <th className="py-2.5 px-3.5 text-right font-medium">ACTIONS</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {filteredStaff.map((member) => (
-                    <tr key={member._id} className="hover:bg-secondary/40 transition-colors">
-                      <td className="py-3 px-3.5">
-                        <div className="font-semibold text-foreground">{member.name}</div>
-                        <div className="font-mono text-[11px] text-muted-foreground">
-                          {member.email}
-                        </div>
-                      </td>
+          <CardContent className="space-y-4">
+            {isUsersLoading ? (
+              <div className="text-xs text-muted-foreground py-6">
+                Loading staff directory from <code>GET /api/v1/users</code>...
+              </div>
+            ) : usersError ? (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-xs text-destructive">
+                <strong>Role Restriction / API Error on GET /api/v1/users:</strong>{' '}
+                {formatErrorMessage(usersError)}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-border bg-card overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-secondary/60 border-b border-border font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                      <th className="py-2.5 px-3.5 font-medium">STAFF MEMBER</th>
+                      <th className="py-2.5 px-3 font-medium">ROLE</th>
+                      <th className="py-2.5 px-3 font-medium">OUTLET</th>
+                      <th className="py-2.5 px-3 font-medium">LAST ACTIVE</th>
+                      <th className="py-2.5 px-3 font-medium">STATUS</th>
+                      <th className="py-2.5 px-3.5 text-right font-medium">ACTIONS</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {filteredStaff.map((member) => (
+                      <tr key={member._id} className="hover:bg-secondary/40 transition-colors">
+                        <td className="py-3 px-3.5">
+                          <div className="font-semibold text-foreground">{member.name}</div>
+                          <div className="font-mono text-[11px] text-muted-foreground">
+                            {member.email}
+                          </div>
+                        </td>
 
-                      <td className="py-3 px-3 whitespace-nowrap">
-                        {member.role === 'owner' ? (
-                          <span className="inline-block rounded border border-primary/25 bg-primary/15 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase text-primary">
-                            Owner
-                          </span>
-                        ) : canWriteStaff ? (
-                          <select
-                            aria-label={`Change role for ${member.name}`}
-                            value={member.role}
-                            onChange={(e) =>
-                              updateRoleMutation.mutate({
-                                id: member._id,
-                                role: e.target.value as 'manager' | 'staff',
-                              })
-                            }
-                            className={`rounded border px-2 py-0.5 font-mono text-[10px] font-semibold uppercase cursor-pointer ${
-                              member.role === 'manager'
-                                ? 'border-warning/30 bg-warning/15 text-warning'
-                                : 'border-border bg-secondary text-foreground'
-                            }`}
-                          >
-                            <option value="manager" className="bg-card text-foreground">
-                              Manager
-                            </option>
-                            <option value="staff" className="bg-card text-foreground">
-                              Staff
-                            </option>
-                          </select>
-                        ) : (
-                          <span
-                            className={`inline-block rounded border px-2 py-0.5 font-mono text-[10px] font-semibold uppercase ${
-                              member.role === 'manager'
-                                ? 'border-warning/30 bg-warning/15 text-warning'
-                                : 'border-border bg-secondary text-foreground'
-                            }`}
-                          >
-                            {member.role}
-                          </span>
-                        )}
-                      </td>
-
-                      <td className="py-3 px-3 font-mono text-[11px] text-muted-foreground whitespace-nowrap">
-                        {liveTenant?.slug ?? tenant?.slug ?? 'main'}
-                      </td>
-
-                      <td className="py-3 px-3 font-mono text-[11px] text-foreground tabular-nums whitespace-nowrap">
-                        {member.lastLoginAt ? formatDateDhaka(member.lastLoginAt) : 'Never'}
-                      </td>
-
-                      <td className="py-3 px-3 whitespace-nowrap">
-                        <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-foreground">
-                          <span
-                            className={`h-1.5 w-1.5 rounded-full ${
-                              member.status === 'active'
-                                ? 'bg-primary'
-                                : member.status === 'invited'
-                                  ? 'bg-warning'
-                                  : 'bg-destructive'
-                            }`}
-                          />
-                          <span className="capitalize">{member.status}</span>
-                        </span>
-                      </td>
-
-                      <td className="py-3 px-3.5 text-right whitespace-nowrap">
-                        {member.role === 'owner' ? (
-                          <span className="inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
-                            <Lock className="h-3 w-3" />
-                            Root
-                          </span>
-                        ) : (
-                          <div className="inline-flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              disabled={!canWriteStaff || toggleStatusMutation.isPending}
-                              onClick={() =>
-                                toggleStatusMutation.mutate({
+                        <td className="py-3 px-3 whitespace-nowrap">
+                          {member.role === 'owner' ? (
+                            <span className="inline-block rounded border border-primary/25 bg-primary/15 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase text-primary">
+                              Owner
+                            </span>
+                          ) : canWriteStaff ? (
+                            <select
+                              aria-label={`Change role for ${member.name}`}
+                              value={member.role}
+                              onChange={(e) =>
+                                updateRoleMutation.mutate({
                                   id: member._id,
-                                  status: member.status === 'disabled' ? 'active' : 'disabled',
+                                  role: e.target.value as 'manager' | 'staff',
                                 })
                               }
-                              className="rounded border border-border bg-card px-2 py-1 text-[11px] font-medium text-foreground hover:bg-secondary transition-colors cursor-pointer disabled:opacity-50"
+                              className={`rounded border px-2 py-0.5 font-mono text-[10px] font-semibold uppercase cursor-pointer ${
+                                member.role === 'manager'
+                                  ? 'border-warning/30 bg-warning/15 text-warning'
+                                  : 'border-border bg-secondary text-foreground'
+                              }`}
                             >
-                              {member.status === 'disabled' ? 'Enable' : 'Disable'}
-                            </button>
-                            <button
-                              type="button"
-                              disabled={!canWriteStaff || deleteStaffMutation.isPending}
-                              onClick={() => deleteStaffMutation.mutate(member._id)}
-                              className="rounded border border-destructive/30 bg-destructive/10 px-2 py-1 text-[11px] font-semibold text-destructive hover:bg-destructive/20 transition-colors cursor-pointer disabled:opacity-50"
+                              <option value="manager" className="bg-card text-foreground">
+                                Manager
+                              </option>
+                              <option value="staff" className="bg-card text-foreground">
+                                Staff
+                              </option>
+                            </select>
+                          ) : (
+                            <span
+                              className={`inline-block rounded border px-2 py-0.5 font-mono text-[10px] font-semibold uppercase ${
+                                member.role === 'manager'
+                                  ? 'border-warning/30 bg-warning/15 text-warning'
+                                  : 'border-border bg-secondary text-foreground'
+                              }`}
                             >
-                              Revoke
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                              {member.role}
+                            </span>
+                          )}
+                        </td>
 
-          <div className="pt-1 text-center font-mono text-[11px] text-muted-foreground">
-            DokanOS Multi-device Session Sync Active ({sessions.length} active refresh token{' '}
-            {sessions.length === 1 ? 'family' : 'families'})
-          </div>
-        </section>
+                        <td className="py-3 px-3 font-mono text-[11px] text-muted-foreground whitespace-nowrap">
+                          {liveTenant?.slug ?? tenant?.slug ?? 'main'}
+                        </td>
+
+                        <td className="py-3 px-3 font-mono text-[11px] text-foreground tabular-nums whitespace-nowrap">
+                          {member.lastLoginAt ? formatDateDhaka(member.lastLoginAt) : 'Never'}
+                        </td>
+
+                        <td className="py-3 px-3 whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-foreground">
+                            <span
+                              className={`h-1.5 w-1.5 rounded-full ${
+                                member.status === 'active'
+                                  ? 'bg-primary'
+                                  : member.status === 'invited'
+                                    ? 'bg-warning'
+                                    : 'bg-destructive'
+                              }`}
+                            />
+                            <span className="capitalize">{member.status}</span>
+                          </span>
+                        </td>
+
+                        <td className="py-3 px-3.5 text-right whitespace-nowrap">
+                          {member.role === 'owner' ? (
+                            <span className="inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
+                              <Lock className="h-3 w-3" />
+                              Root
+                            </span>
+                          ) : (
+                            <div className="inline-flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                disabled={!canWriteStaff || toggleStatusMutation.isPending}
+                                onClick={() =>
+                                  toggleStatusMutation.mutate({
+                                    id: member._id,
+                                    status: member.status === 'disabled' ? 'active' : 'disabled',
+                                  })
+                                }
+                                className="rounded border border-border bg-card px-2 py-1 text-[11px] font-medium text-foreground hover:bg-secondary transition-colors cursor-pointer disabled:opacity-50"
+                              >
+                                {member.status === 'disabled' ? 'Enable' : 'Disable'}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={!canWriteStaff || deleteStaffMutation.isPending}
+                                onClick={() => deleteStaffMutation.mutate(member._id)}
+                                className="rounded border border-destructive/30 bg-destructive/10 px-2 py-1 text-[11px] font-semibold text-destructive hover:bg-destructive/20 transition-colors cursor-pointer disabled:opacity-50"
+                              >
+                                Revoke
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="pt-1 text-center font-mono text-[11px] text-muted-foreground">
+              DokanOS Multi-device Session Sync Active ({sessions.length} active refresh token{' '}
+              {sessions.length === 1 ? 'family' : 'families'})
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Right: Invite New Staff Member (4 cols) */}
-        <section
+        <Card
           aria-labelledby="invite-staff-heading"
-          className="lg:col-span-4 rounded-xl border border-border bg-card text-card-foreground p-6 space-y-4"
+          className="lg:col-span-4 rounded-xl border border-border bg-card text-card-foreground"
         >
-          <div className="space-y-0.5 border-b border-border pb-3">
-            <div className="flex items-center gap-2">
+          <CardHeader className="border-b border-border pb-3">
+            <CardTitle
+              id="invite-staff-heading"
+              className="flex items-center gap-2 text-base font-bold text-foreground"
+            >
               <UserPlus className="h-4 w-4 text-primary" />
-              <h2
-                id="invite-staff-heading"
-                className="font-display text-base font-bold text-foreground"
-              >
-                Invite New Staff Member
-              </h2>
-            </div>
-            <p className="text-xs text-muted-foreground">
+              <span>Invite New Staff Member</span>
+            </CardTitle>
+            <CardDescription className="text-xs text-muted-foreground">
               Generate instant operational login credentials for new floor personnel via{' '}
               <code>POST /api/v1/users/invite</code>.
-            </p>
-          </div>
+            </CardDescription>
+          </CardHeader>
 
-          <div className="space-y-3.5">
+          <CardContent className="pt-4 space-y-3.5">
             <div className="space-y-1">
               <Label
                 htmlFor="inv-name"
@@ -1438,8 +1438,10 @@ export function SettingsPage(): React.ReactElement {
               />
             </div>
 
-            <button
+            <Button
               type="button"
+              className="w-full"
+              size="sm"
               onClick={() => inviteMutation.mutate()}
               disabled={
                 !canWriteStaff ||
@@ -1447,11 +1449,10 @@ export function SettingsPage(): React.ReactElement {
                 !inviteName.trim() ||
                 !inviteEmail.trim()
               }
-              className="w-full inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Send className="h-3.5 w-3.5" />
               <span>{inviteMutation.isPending ? 'Sending Invite...' : 'Send invite'}</span>
-            </button>
+            </Button>
 
             {lastSetupLink && (
               <div className="rounded-lg border border-primary/30 bg-primary/10 p-3 space-y-1 text-xs">
@@ -1467,30 +1468,28 @@ export function SettingsPage(): React.ReactElement {
               enforced by plan staff limits ({usage?.staffCount ?? 0} / {usage?.maxStaff ?? 1}{' '}
               used).
             </p>
-          </div>
-        </section>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Section 3: Role Permission Matrix Card (Stitch Section 3 + @dokanos/shared PERMISSIONS) */}
-      <section
+      <Card
         aria-labelledby="rbac-matrix-heading"
-        className="rounded-xl border border-border bg-card text-card-foreground p-6 space-y-4"
+        className="rounded-xl border border-border bg-card text-card-foreground"
       >
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 space-y-0">
           <div className="space-y-0.5">
-            <div className="flex items-center gap-2">
+            <CardTitle
+              id="rbac-matrix-heading"
+              className="flex items-center gap-2 text-base font-bold text-foreground"
+            >
               <Shield className="h-4 w-4 text-primary" />
-              <h2
-                id="rbac-matrix-heading"
-                className="font-display text-base font-bold text-foreground"
-              >
-                Role Permission Matrix
-              </h2>
-            </div>
-            <p className="text-xs text-muted-foreground">
+              <span>Role Permission Matrix</span>
+            </CardTitle>
+            <CardDescription className="text-xs text-muted-foreground">
               Granular access controls enforced across POS terminal, warehouse, and ledger via{' '}
               <code>@dokanos/shared</code> <code>PERMISSIONS</code>.
-            </p>
+            </CardDescription>
           </div>
 
           <div className="flex items-center gap-2 self-start sm:self-auto">
@@ -1507,317 +1506,325 @@ export function SettingsPage(): React.ReactElement {
               Role-Based Access Control (RBAC 2.1)
             </span>
           </div>
-        </div>
+        </CardHeader>
 
-        <div className="rounded-lg border border-border overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="bg-secondary/60 border-b border-border font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                <th className="py-2.5 px-4 font-medium">PERMISSION SCOPE</th>
-                <th className="py-2.5 px-3 font-medium">MIDDLEWARE KEY</th>
-                <th className="py-2.5 px-4 text-center font-medium">OWNER</th>
-                <th className="py-2.5 px-4 text-center font-medium">MANAGER</th>
-                <th className="py-2.5 px-4 text-center font-medium">STAFF</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {(showAllPermissions
-                ? (Object.keys(PERMISSIONS) as Permission[]).map((perm) => ({
-                    label: perm.replace(':', ' — '),
-                    permission: perm,
-                  }))
-                : STITCH_PERMISSION_ROWS
-              ).map((row) => {
-                const allowedRoles = PERMISSIONS[row.permission] as readonly string[];
-                return (
-                  <tr key={row.permission} className="hover:bg-secondary/40 transition-colors">
-                    <td className="py-3 px-4 font-medium text-foreground">{row.label}</td>
-                    <td className="py-3 px-3 font-mono text-[11px] text-muted-foreground">
-                      {row.permission}
-                    </td>
-                    {(['owner', 'manager', 'staff'] as const).map((roleKey) => {
-                      const hasPerm = allowedRoles.includes(roleKey);
-                      return (
-                        <td key={roleKey} className="py-3 px-4 text-center">
-                          {hasPerm ? (
-                            <span
-                              aria-label={`${roleKey} allowed`}
-                              className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-primary"
-                            >
-                              <Check className="h-3 w-3" />
-                            </span>
-                          ) : (
-                            <span
-                              aria-label={`${roleKey} denied`}
-                              className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-secondary text-muted-foreground"
-                            >
-                              <X className="h-3 w-3" />
-                            </span>
-                          )}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </section>
+        <CardContent>
+          <div className="rounded-lg border border-border bg-card overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="bg-secondary/60 border-b border-border font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <th className="py-2.5 px-4 font-medium">PERMISSION SCOPE</th>
+                  <th className="py-2.5 px-3 font-medium">MIDDLEWARE KEY</th>
+                  <th className="py-2.5 px-4 text-center font-medium">OWNER</th>
+                  <th className="py-2.5 px-4 text-center font-medium">MANAGER</th>
+                  <th className="py-2.5 px-4 text-center font-medium">STAFF</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {(showAllPermissions
+                  ? (Object.keys(PERMISSIONS) as Permission[]).map((perm) => ({
+                      label: perm.replace(':', ' — '),
+                      permission: perm,
+                    }))
+                  : STITCH_PERMISSION_ROWS
+                ).map((row) => {
+                  const allowedRoles = PERMISSIONS[row.permission] as readonly string[];
+                  return (
+                    <tr key={row.permission} className="hover:bg-secondary/40 transition-colors">
+                      <td className="py-3 px-4 font-medium text-foreground">{row.label}</td>
+                      <td className="py-3 px-3 font-mono text-[11px] text-muted-foreground">
+                        {row.permission}
+                      </td>
+                      {(['owner', 'manager', 'staff'] as const).map((roleKey) => {
+                        const hasPerm = allowedRoles.includes(roleKey);
+                        return (
+                          <td key={roleKey} className="py-3 px-4 text-center">
+                            {hasPerm ? (
+                              <span
+                                aria-label={`${roleKey} allowed`}
+                                className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-primary"
+                              >
+                                <Check className="h-3 w-3" />
+                              </span>
+                            ) : (
+                              <span
+                                aria-label={`${roleKey} denied`}
+                                className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-secondary text-muted-foreground"
+                              >
+                                <X className="h-3 w-3" />
+                              </span>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Section 4: System Security, Active Sessions & In-Process Workers (NON-NEGOTIABLE KEPT CARDS) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Kept Card #1: Active Refresh Token Families (GET /api/v1/auth/sessions, DELETE /api/v1/auth/sessions/:familyId) */}
-        <section
+        <Card
           aria-labelledby="active-sessions-heading"
-          className="lg:col-span-6 rounded-xl border border-border bg-card text-card-foreground p-6 space-y-4"
+          className="lg:col-span-6 rounded-xl border border-border bg-card text-card-foreground"
         >
-          <div className="flex items-center justify-between border-b border-border pb-3">
+          <CardHeader className="flex flex-row items-center justify-between border-b border-border pb-3 space-y-0">
             <div className="space-y-0.5">
-              <div className="flex items-center gap-2">
+              <CardTitle
+                id="active-sessions-heading"
+                className="flex items-center gap-2 text-base font-bold text-foreground"
+              >
                 <KeyRound className="h-4 w-4 text-primary" />
-                <h2
-                  id="active-sessions-heading"
-                  className="font-display text-base font-bold text-foreground"
-                >
-                  Active Refresh Token Families
-                </h2>
-              </div>
-              <p className="text-xs text-muted-foreground">
+                <span>Active Refresh Token Families</span>
+              </CardTitle>
+              <CardDescription className="text-xs text-muted-foreground">
                 30-day SHA-256 hashed refresh cookies with rotation &amp; reuse detection (
                 <code>GET /api/v1/auth/sessions</code>).
-              </p>
+              </CardDescription>
             </div>
             <span className="rounded border border-border bg-secondary/60 px-2 py-0.5 font-mono text-[10px] font-semibold text-foreground tabular-nums">
               {sessions.length} Active
             </span>
-          </div>
+          </CardHeader>
 
-          {isSessionsLoading ? (
-            <div className="text-xs text-muted-foreground py-4">Loading active token families...</div>
-          ) : sessionsError ? (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
-              {formatErrorMessage(sessionsError)}
-            </div>
-          ) : sessions.length === 0 ? (
-            <div className="text-xs text-muted-foreground py-4">
-              No active refresh token families found for this user.
-            </div>
-          ) : (
-            <div className="space-y-2.5 text-xs">
-              {sessions.map((sess) => (
-                <div
-                  key={sess.familyId}
-                  className="p-3.5 rounded-lg border border-border bg-secondary/40 flex items-center justify-between gap-3"
-                >
-                  <div className="min-w-0 space-y-0.5">
-                    <div className="font-semibold text-foreground truncate">{sess.userAgent}</div>
-                    <div className="text-[11px] text-muted-foreground font-mono tabular-nums">
-                      IP: {sess.ip} · Created {formatDateDhaka(sess.createdAt)}
-                    </div>
-                    <div className="text-[10px] text-muted-foreground font-mono truncate">
-                      Family ID: {sess.familyId}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={revokeSessionMutation.isPending}
-                    onClick={() => revokeSessionMutation.mutate(sess.familyId)}
-                    className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-destructive/15 hover:text-destructive hover:border-destructive/30 transition-colors cursor-pointer shrink-0"
+          <CardContent className="pt-4">
+            {isSessionsLoading ? (
+              <div className="text-xs text-muted-foreground py-4">
+                Loading active token families...
+              </div>
+            ) : sessionsError ? (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+                {formatErrorMessage(sessionsError)}
+              </div>
+            ) : sessions.length === 0 ? (
+              <div className="text-xs text-muted-foreground py-4">
+                No active refresh token families found for this user.
+              </div>
+            ) : (
+              <div className="space-y-2.5 text-xs">
+                {sessions.map((sess) => (
+                  <div
+                    key={sess.familyId}
+                    className="p-3.5 rounded-lg border border-border bg-secondary/40 flex items-center justify-between gap-3"
                   >
-                    Revoke
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+                    <div className="min-w-0 space-y-0.5">
+                      <div className="font-semibold text-foreground truncate">{sess.userAgent}</div>
+                      <div className="text-[11px] text-muted-foreground font-mono tabular-nums">
+                        IP: {sess.ip} · Created {formatDateDhaka(sess.createdAt)}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground font-mono truncate">
+                        Family ID: {sess.familyId}
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={revokeSessionMutation.isPending}
+                      onClick={() => revokeSessionMutation.mutate(sess.familyId)}
+                      className="hover:bg-destructive/15 hover:text-destructive hover:border-destructive/30"
+                    >
+                      Revoke
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Kept Card #2: BullMQ In-Process Worker Status (GET /api/v1/admin/jobs, POST /api/v1/admin/jobs/:jobName/run) */}
-        <section
+        <Card
           aria-labelledby="bullmq-jobs-heading"
-          className="lg:col-span-6 rounded-xl border border-border bg-card text-card-foreground p-6 space-y-4"
+          className="lg:col-span-6 rounded-xl border border-border bg-card text-card-foreground"
         >
-          <div className="flex items-center justify-between border-b border-border pb-3">
+          <CardHeader className="flex flex-row items-center justify-between border-b border-border pb-3 space-y-0">
             <div className="space-y-0.5">
-              <div className="flex items-center gap-2">
+              <CardTitle
+                id="bullmq-jobs-heading"
+                className="flex items-center gap-2 text-base font-bold text-foreground"
+              >
                 <RefreshCw className="h-4 w-4 text-primary" />
-                <h2
-                  id="bullmq-jobs-heading"
-                  className="font-display text-base font-bold text-foreground"
-                >
-                  BullMQ In-Process Worker Status
-                </h2>
-              </div>
-              <p className="text-xs text-muted-foreground">
+                <span>BullMQ In-Process Worker Status</span>
+              </CardTitle>
+              <CardDescription className="text-xs text-muted-foreground">
                 Runs in-process with the API server (<code>GET /api/v1/admin/jobs</code>). Trigger
                 any job below to test digest and notification generation.
-              </p>
+              </CardDescription>
             </div>
             <span className="rounded border border-primary/25 bg-primary/15 px-2 py-0.5 font-mono text-[10px] font-semibold text-primary">
               OWNER ONLY
             </span>
-          </div>
+          </CardHeader>
 
-          {isJobsLoading ? (
-            <div className="text-xs text-muted-foreground py-4">
-              Loading in-process worker registry...
-            </div>
-          ) : jobsError ? (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
-              <strong>Role Restriction / API Error on GET /api/v1/admin/jobs:</strong>{' '}
-              {formatErrorMessage(jobsError)}
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {jobs.map((job) => (
-                <div
-                  key={job.name}
-                  className="p-3.5 rounded-lg border border-border bg-secondary/40 space-y-2 text-xs"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <span className="font-mono font-bold text-foreground">{job.name}</span>
-                      <span className="text-muted-foreground"> · {job.schedule}</span>
+          <CardContent className="pt-4">
+            {isJobsLoading ? (
+              <div className="text-xs text-muted-foreground py-4">
+                Loading in-process worker registry...
+              </div>
+            ) : jobsError ? (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+                <strong>Role Restriction / API Error on GET /api/v1/admin/jobs:</strong>{' '}
+                {formatErrorMessage(jobsError)}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {jobs.map((job) => (
+                  <div
+                    key={job.name}
+                    className="p-3.5 rounded-lg border border-border bg-secondary/40 space-y-2 text-xs"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <span className="font-mono font-bold text-foreground">{job.name}</span>
+                        <span className="text-muted-foreground"> · {job.schedule}</span>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={!canWriteTenant || triggerJobMutation.isPending}
+                        onClick={() => triggerJobMutation.mutate(job.name)}
+                      >
+                        <Play className="h-3 w-3 text-primary" />
+                        <span>Run Now</span>
+                      </Button>
                     </div>
-                    <button
-                      type="button"
-                      disabled={!canWriteTenant || triggerJobMutation.isPending}
-                      onClick={() => triggerJobMutation.mutate(job.name)}
-                      className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-secondary transition-colors cursor-pointer disabled:opacity-50"
-                    >
-                      <Play className="h-3 w-3 text-primary" />
-                      <span>Run Now</span>
-                    </button>
+                    <p className="text-muted-foreground">{job.description}</p>
+                    <div className="text-[11px] font-mono text-primary tabular-nums">
+                      Status: {job.lastStatus.toUpperCase()} · {job.lastSummary}
+                      {job.lastRunAt ? ` · Last run ${formatDateDhaka(job.lastRunAt)}` : ''}
+                    </div>
                   </div>
-                  <p className="text-muted-foreground">{job.description}</p>
-                  <div className="text-[11px] font-mono text-primary tabular-nums">
-                    Status: {job.lastStatus.toUpperCase()} · {job.lastSummary}
-                    {job.lastRunAt ? ` · Last run ${formatDateDhaka(job.lastRunAt)}` : ''}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* Kept Live Section: Tenant Audit Log (GET /api/v1/tenants/me/audit-logs) */}
-      <section
+      <Card
         id="audit-log-section"
         aria-labelledby="audit-log-heading"
-        className="rounded-xl border border-border bg-card text-card-foreground p-6 space-y-4"
+        className="rounded-xl border border-border bg-card text-card-foreground"
       >
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border pb-3">
+        <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border pb-3 space-y-0">
           <div className="space-y-0.5">
             <div className="flex items-center gap-2">
               <History className="h-4 w-4 text-primary" />
-              <h2
-                id="audit-log-heading"
-                className="font-display text-base font-bold text-foreground"
-              >
+              <CardTitle id="audit-log-heading" className="text-base font-bold text-foreground">
                 Tenant Audit Log
-              </h2>
+              </CardTitle>
               <span className="rounded border border-border bg-secondary/60 px-2 py-0.5 font-mono text-[10px] font-semibold text-muted-foreground tabular-nums">
                 {auditLogs.length} Events
               </span>
             </div>
-            <p className="text-xs text-muted-foreground">
+            <CardDescription className="text-xs text-muted-foreground">
               Immutable tenant-scoped security &amp; configuration events from{' '}
               <code>GET /api/v1/tenants/me/audit-logs</code>.
-            </p>
+            </CardDescription>
           </div>
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={() => void refetchAuditLogs()}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-secondary transition-colors cursor-pointer self-start sm:self-auto"
+            className="self-start sm:self-auto"
           >
             <RefreshCw className="h-3 w-3" />
             <span>Refresh Audit Log</span>
-          </button>
-        </div>
+          </Button>
+        </CardHeader>
 
-        {isAuditLoading ? (
-          <div className="text-xs text-muted-foreground py-4">Loading audit log entries...</div>
-        ) : auditError ? (
-          <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
-            <strong>Role Restriction / API Error on GET /api/v1/tenants/me/audit-logs:</strong>{' '}
-            {formatErrorMessage(auditError)}
-          </div>
-        ) : auditLogs.length === 0 ? (
-          <div className="text-xs text-muted-foreground py-4">
-            No audit events recorded yet. Save shop settings or update staff to record an audit
-            entry.
-          </div>
-        ) : (
-          <div className="rounded-lg border border-border overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="bg-secondary/60 border-b border-border font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                  <th className="py-2 px-3 font-medium">TIMESTAMP</th>
-                  <th className="py-2 px-3 font-medium">ACTION</th>
-                  <th className="py-2 px-3 font-medium">ENTITY</th>
-                  <th className="py-2 px-3 font-medium">ACTOR</th>
-                  <th className="py-2 px-3 font-medium">CHANGES</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {auditLogs.slice(0, 12).map((entry) => (
-                  <tr key={entry._id} className="hover:bg-secondary/40 transition-colors">
-                    <td className="py-2.5 px-3 font-mono text-[11px] text-muted-foreground tabular-nums whitespace-nowrap">
-                      {formatDateDhaka(entry.createdAt)}
-                    </td>
-                    <td className="py-2.5 px-3 font-mono text-[11px] font-semibold text-primary whitespace-nowrap">
-                      {entry.action}
-                    </td>
-                    <td className="py-2.5 px-3 font-mono text-[11px] text-foreground whitespace-nowrap">
-                      {entry.entity}
-                    </td>
-                    <td className="py-2.5 px-3 text-[11px] text-foreground whitespace-nowrap">
-                      {entry.userId?.name ?? 'System'}
-                      {entry.userId?.email ? (
-                        <span className="text-muted-foreground font-mono">
-                          {' '}
-                          ({entry.userId.email})
-                        </span>
-                      ) : null}
-                    </td>
-                    <td className="py-2.5 px-3 font-mono text-[11px] text-muted-foreground max-w-md truncate">
-                      {JSON.stringify(entry.changes)}
-                    </td>
+        <CardContent className="pt-4">
+          {isAuditLoading ? (
+            <div className="text-xs text-muted-foreground py-4">Loading audit log entries...</div>
+          ) : auditError ? (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+              <strong>Role Restriction / API Error on GET /api/v1/tenants/me/audit-logs:</strong>{' '}
+              {formatErrorMessage(auditError)}
+            </div>
+          ) : auditLogs.length === 0 ? (
+            <div className="text-xs text-muted-foreground py-4">
+              No audit events recorded yet. Save shop settings or update staff to record an audit
+              entry.
+            </div>
+          ) : (
+            <div className="rounded-lg border border-border bg-card overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-secondary/60 border-b border-border font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <th className="py-2 px-3 font-medium">TIMESTAMP</th>
+                    <th className="py-2 px-3 font-medium">ACTION</th>
+                    <th className="py-2 px-3 font-medium">ENTITY</th>
+                    <th className="py-2 px-3 font-medium">ACTOR</th>
+                    <th className="py-2 px-3 font-medium">CHANGES</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {auditLogs.slice(0, 12).map((entry) => (
+                    <tr key={entry._id} className="hover:bg-secondary/40 transition-colors">
+                      <td className="py-2.5 px-3 font-mono text-[11px] text-muted-foreground tabular-nums whitespace-nowrap">
+                        {formatDateDhaka(entry.createdAt)}
+                      </td>
+                      <td className="py-2.5 px-3 font-mono text-[11px] font-semibold text-primary whitespace-nowrap">
+                        {entry.action}
+                      </td>
+                      <td className="py-2.5 px-3 font-mono text-[11px] text-foreground whitespace-nowrap">
+                        {entry.entity}
+                      </td>
+                      <td className="py-2.5 px-3 text-[11px] text-foreground whitespace-nowrap">
+                        {entry.userId?.name ?? 'System'}
+                        {entry.userId?.email ? (
+                          <span className="text-muted-foreground font-mono">
+                            {' '}
+                            ({entry.userId.email})
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="py-2.5 px-3 font-mono text-[11px] text-muted-foreground max-w-md truncate">
+                        {JSON.stringify(entry.changes)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Section 5: Danger Zone (Stitch Section 4 — Visibly Unconnected per Rules) */}
-      <section
+      <Card
         aria-labelledby="danger-zone-heading"
-        className="rounded-xl border border-destructive/35 bg-destructive/5 p-6 space-y-4"
+        className="rounded-xl border border-destructive/35 bg-destructive/5 text-card-foreground"
       >
-        <div className="space-y-0.5">
+        <CardHeader className="pb-3">
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-4 w-4 text-destructive" />
-            <h2
+            <CardTitle
               id="danger-zone-heading"
-              className="font-display text-base font-bold text-destructive"
+              className="text-base font-bold text-destructive"
             >
               Danger Zone
-            </h2>
+            </CardTitle>
             <span className="rounded border border-destructive/30 bg-destructive/10 px-2 py-0.5 font-mono text-[10px] font-semibold text-destructive">
               Unconnected — Needs Backend
             </span>
           </div>
-          <p className="text-xs text-muted-foreground">
+          <CardDescription className="text-xs text-muted-foreground">
             Permanent actions affecting shop data, fiscal registers, and branch ownership. Proceed
             with absolute caution.
-          </p>
-        </div>
+          </CardDescription>
+        </CardHeader>
 
-        <div className="space-y-3">
+        <CardContent className="space-y-3">
           <div className="rounded-lg border border-border bg-card p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="space-y-0.5">
               <div className="flex items-center gap-2">
@@ -1833,14 +1840,16 @@ export function SettingsPage(): React.ReactElement {
                 ledger to another verified DokanOS account.
               </p>
             </div>
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               disabled
               title="Unconnected — POST /api/v1/tenants/me/transfer is not implemented in the backend"
-              className="rounded-md border border-destructive/30 bg-secondary px-4 py-2 text-xs font-semibold text-destructive opacity-60 cursor-not-allowed shrink-0"
+              className="border-destructive/30 text-destructive"
             >
               Transfer ownership
-            </button>
+            </Button>
           </div>
 
           <div className="rounded-lg border border-border bg-card p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -1856,17 +1865,18 @@ export function SettingsPage(): React.ReactElement {
                 POS terminal offline caches, and cancel active subscription. This cannot be undone.
               </p>
             </div>
-            <button
+            <Button
               type="button"
+              variant="destructive"
+              size="sm"
               disabled
               title="Unconnected — DELETE /api/v1/tenants/me is not implemented in the backend"
-              className="rounded-md bg-destructive px-4 py-2 text-xs font-semibold text-destructive-foreground opacity-60 cursor-not-allowed shrink-0"
             >
               Delete shop
-            </button>
+            </Button>
           </div>
-        </div>
-      </section>
+        </CardContent>
+      </Card>
     </div>
   );
 }
