@@ -1,0 +1,20 @@
+# Dependabot: small, one-dependency-at-a-time update PRs so the lockfile never
+# drifts dozens of versions behind package.json again (the Oct 31 bulk bump of
+# 52 dependencies broke CI with ERR_PNPM_OUTDATED_LOCKFILE).
+#
+# Updates target dev first, matching this repo's dev-first flow: they land in
+# dev, get checked, then ride dev -> main. Remove the target-branch lines to
+# target the default branch instead.
+version: 2
+updates:
+  - package-ecosystem: "npm" # covers pnpm: reads package.json + pnpm-lock.yaml
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    target-branch: "dev"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    target-branch: "dev"
