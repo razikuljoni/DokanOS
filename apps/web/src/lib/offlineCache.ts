@@ -21,7 +21,7 @@ export interface CachedCompletedSale {
   paidAmount: number;
   dueAmount: number;
   paymentMethod: string;
-  paymentStatus: string;
+  paymentStatus: 'paid' | 'partial' | 'due';
   customerName: string;
   customerPhone: string;
   createdAt: string;
