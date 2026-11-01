@@ -59,7 +59,7 @@ export function AlertsPage(): React.ReactElement {
   const isOffline = useIsOffline();
   const queryClient = useQueryClient();
 
-  const defaultShopThreshold = tenant?.lowStockThreshold ?? 5;
+  const defaultShopThreshold = tenant?.settings.lowStockThreshold ?? 5;
   const [thresholdMode, setThresholdMode] = useState<'product' | 'custom'>('product');
   const [customThresholdInput, setCustomThresholdInput] = useState<string>(
     String(defaultShopThreshold),

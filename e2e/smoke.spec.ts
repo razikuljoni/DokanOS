@@ -24,7 +24,7 @@ test.describe('DokanOS §9 Playwright Chromium Smoke Tests', () => {
     await expect(page.getByRole('button', { name: /Settle & Print Receipt/i })).toBeEnabled();
 
     await page.getByRole('button', { name: /Settle & Print Receipt/i }).click();
-    await expect(page.getByText(/Invoice INV-/i).first()).toBeVisible();
+    await expect(page.getByText(/Sale Completed \(INV-/i).first()).toBeVisible();
   });
 
   test('3. Dashboard Recharts visualizations render', async ({ page }) => {
