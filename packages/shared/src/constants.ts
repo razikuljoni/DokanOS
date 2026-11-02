@@ -29,6 +29,18 @@ export const BILLING_PROVIDERS = ['sslcommerz', 'stripe', 'bkash'] as const;
 export type BillingProviderName = (typeof BILLING_PROVIDERS)[number];
 
 export const PRO_PRICE_BDT = 499;
+export const PRO_PRICE_ANNUAL_BDT = 4200;
+export const TRIAL_DAYS = 14;
+export const BILLING_PERIODS = ['monthly', 'annual'] as const;
+export type BillingPeriod = (typeof BILLING_PERIODS)[number];
+export const BILLING_PERIOD_DAYS: Record<BillingPeriod, number> = {
+  monthly: 30,
+  annual: 365,
+};
+export const BILLING_PERIOD_PRICE_BDT: Record<BillingPeriod, number> = {
+  monthly: PRO_PRICE_BDT,
+  annual: PRO_PRICE_ANNUAL_BDT,
+};
 export const DEFAULT_CURRENCY = 'BDT';
 export const DEFAULT_LOW_STOCK_THRESHOLD = 10;
 export const TIMEZONE_DHAKA = 'Asia/Dhaka';

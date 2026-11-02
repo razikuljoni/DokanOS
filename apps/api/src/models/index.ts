@@ -32,6 +32,7 @@ export interface ITenant extends Document {
   type: ShopType;
   plan: PlanType;
   planExpiresAt: Date | null;
+  trialEndsAt: Date | null;
   ownerId: Types.ObjectId;
   invoiceCounter: number;
   settings: {
@@ -49,6 +50,7 @@ const tenantSchema = new Schema<ITenant>(
     type: { type: String, enum: SHOP_TYPES, required: true, default: 'general' },
     plan: { type: String, enum: PLANS, required: true, default: 'free' },
     planExpiresAt: { type: Date, default: null },
+    trialEndsAt: { type: Date, default: null },
     ownerId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     invoiceCounter: { type: Number, default: 0 },
     settings: {
