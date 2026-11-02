@@ -1,7 +1,24 @@
 import type { RequestHandler } from 'express';
-import { ERROR_CODES } from '@dokanos/shared';
+import { ERROR_CODES, type PlanType } from '@dokanos/shared';
 import { TenantModel } from '../models/index.js';
 import { AppError } from '../utils/errors.js';
+
+/**
+ * The plan a tenant actually has right now. A stored 'pro' whose expiry has
+ * passed counts as 'free' everywhere — request context AND auth responses —
+ * so a signed-in user never sees a stale Pro badge after their trial ends.
+ * The stored row is left untouched; only what the client is told changes.
+ */
+export function getEffectivePlan(tenant: {
+  plan: PlanType;
+  planExpiresAt: Date | null;
+}): PlanType {
+  return tenant.plan === 'pro' &&
+    tenant.planExpiresAt &&
+    new Date(tenant.planExpiresAt).getTime() < Date.now()
+    ? 'free'
+    : tenant.plan;
+}
 
 export const requireTenant: RequestHandler = async (req, _res, next) => {
   try {
@@ -41,12 +58,7 @@ export const requireTenant: RequestHandler = async (req, _res, next) => {
     }
 
     // Check if Pro plan has expired
-    const effectivePlan =
-      tenant.plan === 'pro' &&
-      tenant.planExpiresAt &&
-      new Date(tenant.planExpiresAt).getTime() < Date.now()
-        ? 'free'
-        : tenant.plan;
+    const effectivePlan = getEffectivePlan(tenant);
 
     req.tenant = {
       id: tenant._id.toString(),

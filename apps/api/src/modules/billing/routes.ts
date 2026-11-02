@@ -3,9 +3,14 @@ import mongoose, { Types } from 'mongoose';
 import axios from 'axios';
 import Stripe from 'stripe';
 import {
+  BILLING_PERIODS,
+  BILLING_PERIOD_DAYS,
+  BILLING_PERIOD_PRICE_BDT,
   ERROR_CODES,
   PLAN_LIMITS,
+  PRO_PRICE_ANNUAL_BDT,
   PRO_PRICE_BDT,
+  type BillingPeriod,
   type PlanType,
 } from '@dokanos/shared';
 import {
@@ -37,17 +42,38 @@ export interface BillingProvider {
     tenant: TenantContext,
     user: { name: string; email: string },
     plan: PlanType,
+    period: BillingPeriod,
   ): Promise<CheckoutSessionResult>;
   handleWebhook(req: Request): Promise<{ processed: boolean; duplicate: boolean; tranId: string }>;
   getSubscription(tenantId: string): Promise<unknown>;
 }
 
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Milliseconds of Pro time a billing period buys. */
+function periodDaysMs(period: BillingPeriod): number {
+  return BILLING_PERIOD_DAYS[period] * DAY_MS;
+}
+
+/**
+ * The period a stored payment row pays for. New rows carry `raw.period`;
+ * rows created before periods existed fall back to their amount.
+ */
+function resolvePeriodFromPayment(payment: {
+  amount: number;
+  raw?: unknown;
+}): BillingPeriod {
+  const raw = payment.raw as { period?: unknown } | null | undefined;
+  if (raw && typeof raw.period === 'string' && (BILLING_PERIODS as readonly string[]).includes(raw.period)) {
+    return raw.period as BillingPeriod;
+  }
+  return payment.amount === PRO_PRICE_ANNUAL_BDT ? 'annual' : 'monthly';
+}
 
 /**
  * Validates and applies an SSLCommerz payment idempotently.
  * Uses unique index { provider: 'sslcommerz', eventId: tran_id } and atomic status transition
- * from 'pending' -> 'paid' so a replayed callback or IPN never double-extends the 30-day Pro period.
+ * from 'pending' -> 'paid' so a replayed callback or IPN never double-extends the Pro period.
  */
 export async function validateAndApplySslCommerzPayment(params: {
   tranId: string;
@@ -147,6 +173,8 @@ export async function validateAndApplySslCommerzPayment(params: {
         throw AppError.notFound('Tenant not found for payment');
       }
 
+      // Paid time stacks on top of any still-active period (including a
+      // running Pro trial), so paying early never eats remaining days.
       const baseDate =
         tenant.plan === 'pro' &&
         tenant.planExpiresAt &&
@@ -154,9 +182,11 @@ export async function validateAndApplySslCommerzPayment(params: {
           ? tenant.planExpiresAt.getTime()
           : Date.now();
 
-      const newExpiresAt = new Date(baseDate + THIRTY_DAYS_MS);
+      const period = resolvePeriodFromPayment(existingPayment);
+      const newExpiresAt = new Date(baseDate + periodDaysMs(period));
       tenant.plan = 'pro';
       tenant.planExpiresAt = newExpiresAt;
+      tenant.trialEndsAt = null;
       await tenant.save({ session });
 
       await SubscriptionModel.findOneAndUpdate(
@@ -205,30 +235,34 @@ class SslCommerzBillingProvider implements BillingProvider {
   async createCheckout(
     tenant: TenantContext,
     user: { name: string; email: string },
+    _plan: PlanType,
+    period: BillingPeriod,
   ): Promise<CheckoutSessionResult> {
     const tranId = `DKN-${tenant.slug.toUpperCase().slice(0, 10)}-${Date.now()}`;
+    const amount = BILLING_PERIOD_PRICE_BDT[period];
+    const productName = `DokanOS Pro (${BILLING_PERIOD_DAYS[period]} days)`;
 
     await PaymentModel.create({
       tenantId: new Types.ObjectId(tenant.id),
       provider: 'sslcommerz',
       providerRef: tranId,
       eventId: tranId,
-      amount: PRO_PRICE_BDT,
+      amount,
       currency: 'BDT',
       status: 'pending',
       purpose: 'subscription',
-      raw: { initiatedBy: user.email },
+      raw: { initiatedBy: user.email, period },
     });
 
     // Attempt live sandbox call when in production sandbox mode; fall back to local sandbox simulator redirect in development
-    let gatewayUrl = `/app/billing?sandbox_checkout=sslcommerz&tran_id=${encodeURIComponent(tranId)}&amount=${PRO_PRICE_BDT}`;
+    let gatewayUrl = `/app/billing?sandbox_checkout=sslcommerz&tran_id=${encodeURIComponent(tranId)}&amount=${amount}&period=${period}`;
 
     if (env.NODE_ENV === 'production' && env.SSLCZ_SANDBOX) {
       try {
         const formData = new URLSearchParams({
           store_id: env.SSLCZ_STORE_ID,
           store_passwd: env.SSLCZ_STORE_PASSWD,
-          total_amount: String(PRO_PRICE_BDT),
+          total_amount: String(amount),
           currency: 'BDT',
           tran_id: tranId,
           success_url: env.SSLCZ_SUCCESS_URL,
@@ -242,7 +276,7 @@ class SslCommerzBillingProvider implements BillingProvider {
           cus_country: 'Bangladesh',
           cus_phone: '01700000000',
           shipping_method: 'NO',
-          product_name: 'DokanOS Pro (30 days)',
+          product_name: productName,
           product_category: 'Subscription',
           product_profile: 'non-physical-goods',
         });
@@ -310,22 +344,25 @@ class StripeTestBillingProvider implements BillingProvider {
   async createCheckout(
     tenant: TenantContext,
     user: { name: string; email: string },
+    _plan: PlanType,
+    period: BillingPeriod,
   ): Promise<CheckoutSessionResult> {
     const tranId = `STRIPE-${tenant.slug.toUpperCase().slice(0, 8)}-${Date.now()}`;
+    const amount = BILLING_PERIOD_PRICE_BDT[period];
 
     await PaymentModel.create({
       tenantId: new Types.ObjectId(tenant.id),
       provider: 'stripe',
       providerRef: tranId,
       eventId: tranId,
-      amount: PRO_PRICE_BDT,
+      amount,
       currency: 'BDT',
       status: 'pending',
       purpose: 'subscription',
-      raw: { initiatedBy: user.email, testMode: true },
+      raw: { initiatedBy: user.email, testMode: true, period },
     });
 
-    const gatewayUrl = `/app/billing?sandbox_checkout=stripe&tran_id=${encodeURIComponent(tranId)}&amount=${PRO_PRICE_BDT}`;
+    const gatewayUrl = `/app/billing?sandbox_checkout=stripe&tran_id=${encodeURIComponent(tranId)}&amount=${amount}&period=${period}`;
 
     return {
       provider: 'stripe',
@@ -380,9 +417,19 @@ class StripeTestBillingProvider implements BillingProvider {
     existing.status = 'paid';
     await existing.save();
 
-    const newExpiresAt = new Date(Date.now() + THIRTY_DAYS_MS);
+    // Same stacking rule as SSLCommerz: paid time extends any active period
+    // (including a running trial) instead of resetting it.
+    const tenant = await TenantModel.findById(existing.tenantId);
+    const baseDate =
+      tenant?.plan === 'pro' &&
+      tenant.planExpiresAt &&
+      tenant.planExpiresAt.getTime() > Date.now()
+        ? tenant.planExpiresAt.getTime()
+        : Date.now();
+    const period = resolvePeriodFromPayment(existing);
+    const newExpiresAt = new Date(baseDate + periodDaysMs(period));
     await TenantModel.findByIdAndUpdate(existing.tenantId, {
-      $set: { plan: 'pro', planExpiresAt: newExpiresAt },
+      $set: { plan: 'pro', planExpiresAt: newExpiresAt, trialEndsAt: null },
     });
 
     await SubscriptionModel.findOneAndUpdate(
@@ -569,7 +616,9 @@ billingRouter.get('/plan', requirePermission('billing:read'), async (req, res, n
       data: {
         plan: currentPlan,
         priceBdt: PRO_PRICE_BDT,
+        annualPriceBdt: PRO_PRICE_ANNUAL_BDT,
         planExpiresAt: tenant?.planExpiresAt ?? null,
+        trialEndsAt: tenant?.trialEndsAt ?? null,
         limits: {
           maxProducts: Number.isFinite(limits.maxProducts) ? limits.maxProducts : null,
           maxStaff: limits.maxStaff,
@@ -589,16 +638,29 @@ billingRouter.get('/plan', requirePermission('billing:read'), async (req, res, n
   }
 });
 
+// Billing period the client asked to buy. Absent means monthly (the old
+// behaviour); anything else is a 400, never silently treated as monthly.
+function parseBillingPeriod(body: unknown): BillingPeriod {
+  const period = (body as { period?: unknown } | null | undefined)?.period;
+  if (period === undefined) return 'monthly';
+  if (typeof period === 'string' && (BILLING_PERIODS as readonly string[]).includes(period)) {
+    return period as BillingPeriod;
+  }
+  throw AppError.badRequest("Invalid billing period. Expected 'monthly' or 'annual'.");
+}
+
 // POST /api/v1/billing/sslcommerz/init
 billingRouter.post(
   '/sslcommerz/init',
   requirePermission('billing:write'),
   async (req, res, next) => {
     try {
+      const period = parseBillingPeriod(req.body);
       const checkout = await sslCommerzProvider.createCheckout(
         req.tenant!,
         { name: req.user!.name, email: req.user!.email },
         'pro',
+        period,
       );
       res.status(201).json({
         data: {
@@ -606,7 +668,8 @@ billingRouter.post(
           tranId: checkout.tranId,
           provider: checkout.provider,
           mode: checkout.mode,
-          amount: PRO_PRICE_BDT,
+          amount: BILLING_PERIOD_PRICE_BDT[period],
+          period,
         },
       });
     } catch (err) {
@@ -621,10 +684,12 @@ billingRouter.post(
   requirePermission('billing:write'),
   async (req, res, next) => {
     try {
+      const period = parseBillingPeriod(req.body);
       const checkout = await stripeProvider.createCheckout(
         req.tenant!,
         { name: req.user!.name, email: req.user!.email },
         'pro',
+        period,
       );
       res.status(201).json({
         data: {
@@ -632,7 +697,8 @@ billingRouter.post(
           tranId: checkout.tranId,
           provider: checkout.provider,
           mode: checkout.mode,
-          amount: PRO_PRICE_BDT,
+          amount: BILLING_PERIOD_PRICE_BDT[period],
+          period,
         },
       });
     } catch (err) {
@@ -648,6 +714,7 @@ billingRouter.post('/bkash/init', requirePermission('billing:write'), async (req
       req.tenant!,
       { name: req.user!.name, email: req.user!.email },
       'pro',
+      parseBillingPeriod(req.body),
     );
     res.status(501).json({});
   } catch (err) {
@@ -668,7 +735,7 @@ billingRouter.post('/cancel', requirePermission('billing:write'), async (req, re
     const immediate = Boolean((req.body as { immediate?: boolean } | undefined)?.immediate);
     if (immediate) {
       await TenantModel.findByIdAndUpdate(tenantObjectId, {
-        $set: { plan: 'free', planExpiresAt: null },
+        $set: { plan: 'free', planExpiresAt: null, trialEndsAt: null },
       });
     }
 

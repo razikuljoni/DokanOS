@@ -657,7 +657,7 @@ export function LandingPage(): React.ReactElement {
                   </li>
                   <li className="flex items-center gap-2.5">
                     <Check className="h-3.5 w-3.5 text-[#14532D] shrink-0" />
-                    <span>Up to 200 products</span>
+                    <span>Up to 100 products</span>
                   </li>
                   <li className="flex items-center gap-2.5">
                     <Check className="h-3.5 w-3.5 text-[#14532D] shrink-0" />
@@ -755,7 +755,7 @@ export function LandingPage(): React.ReactElement {
           <div className="flex items-center justify-center gap-1.5 text-[11px] text-[#57534E]">
             <ShieldCheck className="h-3.5 w-3.5 text-[#57534E] shrink-0" />
             <span>
-              Pay with bKash, Nagad or card. Cancel anytime. No hidden installation fees.
+              Pay by card via SSLCommerz. Cancel anytime. No hidden installation fees.
             </span>
           </div>
         </section>
@@ -817,7 +817,7 @@ export function LandingPage(): React.ReactElement {
                 disabled={loadingDemo}
                 className="inline-flex items-center justify-center rounded-md border border-[#E7E0D4] bg-white px-6 py-2.5 text-xs font-semibold text-[#1C1917] hover:bg-[#F3EFE6] transition-colors cursor-pointer disabled:opacity-60"
               >
-                {loadingDemo ? 'Opening Demo Shop...' : 'Schedule a live demo'}
+                {loadingDemo ? 'Opening Demo Shop...' : 'Try the live demo shop'}
               </button>
             </div>
           </div>
