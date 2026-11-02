@@ -16,7 +16,12 @@ import {
   ShoppingCart,
   X,
 } from 'lucide-react';
-import { PRO_PRICE_BDT } from '@dokanos/shared';
+import {
+  BILLING_PERIOD_DAYS,
+  BILLING_PERIOD_PRICE_BDT,
+  PRO_PRICE_BDT,
+  type BillingPeriod,
+} from '@dokanos/shared';
 import { useAuthStore } from '@/stores/authStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useIsOffline } from '@/stores/offlineStore';
@@ -691,7 +696,9 @@ export function AlertsPage(): React.ReactElement {
 interface BillingPlanResponse {
   plan: 'free' | 'pro';
   priceBdt: number;
+  annualPriceBdt: number;
   planExpiresAt: string | null;
+  trialEndsAt: string | null;
   limits: {
     maxProducts: number | null;
     maxStaff: number;
@@ -720,10 +727,13 @@ export function BillingPage(): React.ReactElement {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
 
+  const [billingPeriod, setBillingPeriod] = useState<BillingPeriod>('monthly');
+
   const [sandboxModal, setSandboxModal] = useState<{
     provider: 'sslcommerz' | 'stripe';
     tranId: string;
     amount: number;
+    period: BillingPeriod;
   } | null>(() => {
     const checkout = searchParams.get('sandbox_checkout');
     const tranId = searchParams.get('tran_id');
@@ -732,6 +742,7 @@ export function BillingPage(): React.ReactElement {
         provider: checkout,
         tranId,
         amount: Number(searchParams.get('amount') ?? PRO_PRICE_BDT),
+        period: (searchParams.get('period') === 'annual' ? 'annual' : 'monthly') as BillingPeriod,
       };
     }
     return null;
@@ -752,10 +763,10 @@ export function BillingPage(): React.ReactElement {
   const initSslCommerzMutation = useMutation({
     mutationFn: async () => {
       return apiFetch<{
-        data: { GatewayPageURL: string; tranId: string; amount: number };
+        data: { GatewayPageURL: string; tranId: string; amount: number; period: BillingPeriod };
       }>('/api/v1/billing/sslcommerz/init', {
         method: 'POST',
-        body: JSON.stringify({}),
+        body: JSON.stringify({ period: billingPeriod }),
       });
     },
     onSuccess: (res) => {
@@ -768,6 +779,7 @@ export function BillingPage(): React.ReactElement {
         provider: 'sslcommerz',
         tranId: res.data.tranId,
         amount: res.data.amount,
+        period: res.data.period,
       });
     },
   });
@@ -775,10 +787,10 @@ export function BillingPage(): React.ReactElement {
   const initStripeTestMutation = useMutation({
     mutationFn: async () => {
       return apiFetch<{
-        data: { checkoutUrl: string; tranId: string; amount: number };
+        data: { checkoutUrl: string; tranId: string; amount: number; period: BillingPeriod };
       }>('/api/v1/billing/stripe/checkout', {
         method: 'POST',
-        body: JSON.stringify({}),
+        body: JSON.stringify({ period: billingPeriod }),
       });
     },
     onSuccess: (res) => {
@@ -791,6 +803,7 @@ export function BillingPage(): React.ReactElement {
         provider: 'stripe',
         tranId: res.data.tranId,
         amount: res.data.amount,
+        period: res.data.period,
       });
     },
   });
@@ -804,14 +817,14 @@ export function BillingPage(): React.ReactElement {
     },
     onSuccess: (_, immediate) => {
       if (immediate) {
-        updateTenant({ plan: 'free', planExpiresAt: null });
+        updateTenant({ plan: 'free', planExpiresAt: null, trialEndsAt: null });
       }
       void queryClient.invalidateQueries({ queryKey: ['billing', tenant?.id] });
       addToast({
         title: immediate ? 'Switched to Free Plan' : 'Subscription Renewal Cancelled',
         description: immediate
           ? 'Your shop is now on the Free plan.'
-          : 'Your Pro plan remains active until the end of the current 30-day period.',
+          : 'Your Pro plan remains active until the end of the current period.',
         variant: 'warning',
       });
     },
@@ -850,7 +863,7 @@ export function BillingPage(): React.ReactElement {
       void queryClient.invalidateQueries({ queryKey: ['notifications', tenant?.id] });
       addToast({
         title: 'Upgraded to DokanOS Pro!',
-        description: 'Payment validated server-side and Pro limits unlocked for 30 days.',
+        description: `Payment validated server-side and Pro limits unlocked for ${sandboxModal ? BILLING_PERIOD_DAYS[sandboxModal.period] : 30} days.`,
         variant: 'success',
       });
     },
@@ -975,13 +988,22 @@ export function BillingPage(): React.ReactElement {
               <CardDescription>Current Shop Plan</CardDescription>
               <CardTitle className="text-2xl flex items-center justify-between">
                 <span>
-                  {billing?.plan === 'pro' ? 'DokanOS Pro (৳499 / 30d)' : 'DokanOS Free Plan'}
+                  {billing?.plan === 'pro' &&
+                  billing?.trialEndsAt &&
+                  new Date(billing.trialEndsAt).getTime() > Date.now()
+                    ? 'DokanOS Pro Trial'
+                    : billing?.plan === 'pro'
+                      ? 'DokanOS Pro'
+                      : 'DokanOS Free Plan'}
                 </span>
                 <ShieldCheck className="h-5 w-5 text-primary" />
               </CardTitle>
               {billing?.planExpiresAt && (
                 <p className="text-xs text-muted-foreground tabular-nums">
-                  Current 30-day period valid until {formatDateDhaka(billing.planExpiresAt)}
+                  {billing?.trialEndsAt &&
+                  new Date(billing.trialEndsAt).getTime() > Date.now()
+                    ? `Free trial valid until ${formatDateDhaka(billing.planExpiresAt)} — pay before then to keep Pro without a gap`
+                    : `Current period valid until ${formatDateDhaka(billing.planExpiresAt)}`}
                 </p>
               )}
             </CardHeader>
@@ -1047,15 +1069,32 @@ export function BillingPage(): React.ReactElement {
             <CardHeader>
               <CardTitle>
                 {billing?.plan === 'pro'
-                  ? 'Manage Pro Plan · Extend 30 Days (৳499)'
-                  : 'Upgrade to DokanOS Pro (30 Days — ৳499)'}
+                  ? `Manage Pro Plan · Extend ${BILLING_PERIOD_DAYS[billingPeriod]} Days (৳${BILLING_PERIOD_PRICE_BDT[billingPeriod].toLocaleString()})`
+                  : `Upgrade to DokanOS Pro (${BILLING_PERIOD_DAYS[billingPeriod]} Days — ৳${BILLING_PERIOD_PRICE_BDT[billingPeriod].toLocaleString()})`}
               </CardTitle>
               <CardDescription>
-                Local Bangladeshi gateways use one-off 30-day payments. Every callback is verified
-                server-side and deduplicated on <code>{'{ provider, eventId }'}</code>.
+                Local Bangladeshi gateways use one-off payments — no auto-renewal. Every callback
+                is verified server-side and deduplicated on <code>{'{ provider, eventId }'}</code>.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant={billingPeriod === 'monthly' ? 'default' : 'outline'}
+                  onClick={() => setBillingPeriod('monthly')}
+                >
+                  Monthly · ৳499 / 30 days
+                </Button>
+                <Button
+                  type="button"
+                  variant={billingPeriod === 'annual' ? 'default' : 'outline'}
+                  onClick={() => setBillingPeriod('annual')}
+                >
+                  Annual · ৳4,200 / 365 days (save ৳1,788)
+                </Button>
+              </div>
+
               <Button
                 className="w-full justify-between"
                 disabled={initSslCommerzMutation.isPending}
@@ -1064,8 +1103,8 @@ export function BillingPage(): React.ReactElement {
                 <span className="flex items-center gap-2">
                   <CreditCard className="h-4 w-4" />
                   {billing?.plan === 'pro'
-                    ? 'Extend +30 Days via SSLCommerz (SANDBOX)'
-                    : 'Upgrade ৳499 via SSLCommerz (SANDBOX)'}
+                    ? `Extend +${BILLING_PERIOD_DAYS[billingPeriod]} Days via SSLCommerz (SANDBOX)`
+                    : `Upgrade ৳${BILLING_PERIOD_PRICE_BDT[billingPeriod].toLocaleString()} via SSLCommerz (SANDBOX)`}
                 </span>
                 <span className="font-mono text-xs">Test Visa 4111...</span>
               </Button>
@@ -1079,8 +1118,8 @@ export function BillingPage(): React.ReactElement {
                 <span className="flex items-center gap-2">
                   <CreditCard className="h-4 w-4" />
                   {billing?.plan === 'pro'
-                    ? 'Extend +30 Days via Stripe (TEST MODE)'
-                    : 'Upgrade ৳499 via Stripe Checkout (TEST MODE)'}
+                    ? `Extend +${BILLING_PERIOD_DAYS[billingPeriod]} Days via Stripe (TEST MODE)`
+                    : `Upgrade ৳${BILLING_PERIOD_PRICE_BDT[billingPeriod].toLocaleString()} via Stripe Checkout (TEST MODE)`}
                 </span>
                 <span className="font-mono text-xs">Test Card 4242...</span>
               </Button>

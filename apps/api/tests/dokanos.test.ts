@@ -348,7 +348,10 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
     expect(initRes.status).toBe(201);
     const tranId = initRes.body.data.tranId as string;
 
-    const beforeCallback = Date.now();
+    // Paying stacks on the running 14-day trial instead of resetting it, so
+    // the 30 days are measured from the trial end, not from the callback.
+    const beforePayment = await TenantModel.findById(shop.tenantId).lean();
+    const trialEndsMs = new Date(beforePayment!.planExpiresAt!).getTime();
 
     // First callback
     const cb1 = await request(app)
@@ -378,8 +381,9 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
 
     const tenant = await TenantModel.findById(shop.tenantId).lean();
     expect(tenant?.plan).toBe('pro');
+    expect(tenant?.trialEndsAt).toBeNull();
     const expiresAtMs = new Date(tenant!.planExpiresAt!).getTime();
-    const daysAdded = (expiresAtMs - beforeCallback) / (1000 * 60 * 60 * 24);
+    const daysAdded = (expiresAtMs - trialEndsMs) / (1000 * 60 * 60 * 24);
     expect(daysAdded).toBeGreaterThan(29.5);
     expect(daysAdded).toBeLessThan(30.5);
   });
@@ -472,6 +476,11 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
   // 7. Plan limits
   it('7. Plan limits: Free tenant creating the 101st product returns 403 PLAN_LIMIT', async () => {
     const shop = await registerShop({ shopName: 'Free Limit Shop', email: 'owner@limit.bd' });
+    // New shops start on a Pro trial (unlimited), so pin this tenant to free
+    // to exercise the free-plan limit itself.
+    await TenantModel.findByIdAndUpdate(shop.tenantId, {
+      $set: { plan: 'free', planExpiresAt: null, trialEndsAt: null },
+    });
     const tenantObjectId = new mongoose.Types.ObjectId(shop.tenantId);
 
     // Bulk seed 100 active products directly for speed
@@ -693,7 +702,9 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
     expect(initRes.status).toBe(201);
     const tranId = initRes.body.data.tranId as string;
 
-    const beforeMs = Date.now();
+    // Monthly payment stacks on the running trial: 30 days from trial end.
+    const beforePayment = await TenantModel.findById(shop.tenantId).lean();
+    const trialEndsMs = new Date(beforePayment!.planExpiresAt!).getTime();
 
     // Unauthenticated browser GET redirect from SSLCommerz sandbox
     const getCallbackRes = await request(app)
@@ -713,7 +724,7 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
     const tenant = await TenantModel.findById(shop.tenantId).lean();
     expect(tenant?.plan).toBe('pro');
     const daysAdded =
-      (new Date(tenant!.planExpiresAt!).getTime() - beforeMs) / (1000 * 60 * 60 * 24);
+      (new Date(tenant!.planExpiresAt!).getTime() - trialEndsMs) / (1000 * 60 * 60 * 24);
     expect(daysAdded).toBeGreaterThan(29.5);
     expect(daysAdded).toBeLessThan(30.5);
   });
@@ -721,28 +732,42 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
   it('10b. SSLCommerz GET browser redirect with unknown tran_id returns 404 and changes nothing', async () => {
     const shop = await registerShop({ shopName: 'Unknown Tran Shop', email: 'owner@unk.bd' });
 
+    const before = await TenantModel.findById(shop.tenantId).lean();
+
     const res = await request(app).get('/api/v1/billing/sslcommerz/success?tran_id=UNKNOWN_TRAN_999');
     expect(res.status).toBe(404);
 
     const tenant = await TenantModel.findById(shop.tenantId).lean();
-    expect(tenant?.plan).toBe('free');
-    expect(tenant?.planExpiresAt).toBeNull();
+    expect(tenant?.plan).toBe(before?.plan);
+    expect(new Date(tenant!.planExpiresAt!).toISOString()).toBe(
+      new Date(before!.planExpiresAt!).toISOString(),
+    );
+    expect(new Date(tenant!.trialEndsAt!).toISOString()).toBe(
+      new Date(before!.trialEndsAt!).toISOString(),
+    );
   });
 
   // 11. Phase 4 (§5) — Full End-to-End Sandbox Payment Proof (SSLCommerz Primary + Stripe Test Mode Secondary)
-  it('11. Phase 4 E2E Payment Proof: Free tenant upgrades via SSLCommerz Sandbox & Stripe Test Mode with GET/POST callback + IPN replay idempotency', async () => {
+  it('11. Phase 4 E2E Payment Proof: Trial tenant pays via SSLCommerz Sandbox & Stripe Test Mode with GET/POST callback + IPN replay idempotency', async () => {
     const shop = await registerShop({
       shopName: 'Phase 4 Sandbox Proof Pharmacy',
       email: 'proof@dokanos.bd',
     });
 
-    // Verify initial Free state
+    // Verify initial Pro trial state (new shops start on a 14-day trial)
     const initialPlanRes = await request(app)
       .get('/api/v1/billing/plan')
       .set('Authorization', `Bearer ${shop.accessToken}`);
     expect(initialPlanRes.status).toBe(200);
-    expect(initialPlanRes.body.data.plan).toBe('free');
-    expect(initialPlanRes.body.data.planExpiresAt).toBeNull();
+    expect(initialPlanRes.body.data.plan).toBe('pro');
+    const initialTrialDays =
+      (new Date(initialPlanRes.body.data.planExpiresAt).getTime() - Date.now()) /
+      (1000 * 60 * 60 * 24);
+    expect(initialTrialDays).toBeGreaterThan(13.5);
+    expect(initialTrialDays).toBeLessThan(14.5);
+    expect(initialPlanRes.body.data.trialEndsAt).toBe(
+      initialPlanRes.body.data.planExpiresAt,
+    );
 
     // Step 2: Initiate SSLCommerz Sandbox Checkout
     const initRes = await request(app)
@@ -808,5 +833,127 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
 
     const tenantAfterReplays = await TenantModel.findById(shop.tenantId).lean();
     expect(new Date(tenantAfterReplays!.planExpiresAt!).toISOString()).toBe(firstExpiresAtIso);
+  });
+
+  // 12. Trial provisioning
+  it('12. Trial: registration grants a 14-day Pro trial with full Pro limits', async () => {
+    const shop = await registerShop({ shopName: 'Trial Shop', email: 'owner@trial.bd' });
+
+    const tenant = await TenantModel.findById(shop.tenantId).lean();
+    expect(tenant?.plan).toBe('pro');
+    expect(tenant?.trialEndsAt).not.toBeNull();
+    expect(new Date(tenant!.trialEndsAt!).toISOString()).toBe(
+      new Date(tenant!.planExpiresAt!).toISOString(),
+    );
+    const trialDays =
+      (new Date(tenant!.planExpiresAt!).getTime() - Date.now()) / (1000 * 60 * 60 * 24);
+    expect(trialDays).toBeGreaterThan(13.5);
+    expect(trialDays).toBeLessThan(14.5);
+
+    const planRes = await request(app)
+      .get('/api/v1/billing/plan')
+      .set('Authorization', `Bearer ${shop.accessToken}`);
+    expect(planRes.status).toBe(200);
+    expect(planRes.body.data.plan).toBe('pro');
+    expect(planRes.body.data.trialEndsAt).toBe(planRes.body.data.planExpiresAt);
+    expect(planRes.body.data.limits.maxProducts).toBeNull(); // Pro: unlimited
+  });
+
+  // 13. Annual billing via SSLCommerz
+  it('13. Annual: SSLCommerz annual init charges ৳4,200 and extends 365 days from trial end', async () => {
+    const shop = await registerShop({ shopName: 'Annual Shop', email: 'owner@annual.bd' });
+
+    const initRes = await request(app)
+      .post('/api/v1/billing/sslcommerz/init')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({ period: 'annual' });
+    expect(initRes.status).toBe(201);
+    expect(initRes.body.data.amount).toBe(4200);
+    expect(initRes.body.data.period).toBe('annual');
+    const tranId = initRes.body.data.tranId as string;
+
+    const pendingPayment = await PaymentModel.findOne({
+      provider: 'sslcommerz',
+      eventId: tranId,
+    }).lean();
+    expect(pendingPayment?.amount).toBe(4200);
+
+    const beforePayment = await TenantModel.findById(shop.tenantId).lean();
+    const trialEndsMs = new Date(beforePayment!.planExpiresAt!).getTime();
+
+    const cb = await request(app).post('/api/v1/billing/sslcommerz/ipn').send({
+      tran_id: tranId,
+      val_id: 'VAL-ANNUAL-01',
+      amount: 4200,
+      currency: 'BDT',
+      status: 'VALID',
+    });
+    expect(cb.status).toBe(200);
+    expect(cb.body.data.duplicate).toBe(false);
+
+    const tenant = await TenantModel.findById(shop.tenantId).lean();
+    expect(tenant?.plan).toBe('pro');
+    expect(tenant?.trialEndsAt).toBeNull();
+    const daysAdded = (new Date(tenant!.planExpiresAt!).getTime() - trialEndsMs) / (1000 * 60 * 60 * 24);
+    expect(daysAdded).toBeGreaterThan(364.5);
+    expect(daysAdded).toBeLessThan(365.5);
+  });
+
+  // 14. Annual billing via Stripe test mode
+  it('14. Annual: Stripe annual checkout charges ৳4,200 and extends 365 days from trial end', async () => {
+    const shop = await registerShop({ shopName: 'Stripe Annual Shop', email: 'owner@stripe.bd' });
+
+    const initRes = await request(app)
+      .post('/api/v1/billing/stripe/checkout')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({ period: 'annual' });
+    expect(initRes.status).toBe(201);
+    expect(initRes.body.data.amount).toBe(4200);
+    const tranId = initRes.body.data.tranId as string;
+
+    const beforePayment = await TenantModel.findById(shop.tenantId).lean();
+    const trialEndsMs = new Date(beforePayment!.planExpiresAt!).getTime();
+
+    const hook = await request(app).post('/api/v1/billing/stripe/webhook').send({
+      id: `evt_${Date.now()}`,
+      type: 'checkout.session.completed',
+      tran_id: tranId,
+    });
+    expect(hook.status).toBe(200);
+
+    const tenant = await TenantModel.findById(shop.tenantId).lean();
+    expect(tenant?.plan).toBe('pro');
+    expect(tenant?.trialEndsAt).toBeNull();
+    const daysAdded = (new Date(tenant!.planExpiresAt!).getTime() - trialEndsMs) / (1000 * 60 * 60 * 24);
+    expect(daysAdded).toBeGreaterThan(364.5);
+    expect(daysAdded).toBeLessThan(365.5);
+  });
+
+  // 15. Trial expiry is enforced by the tenant middleware
+  it('15. Trial expiry: an expired Pro trial is treated as free on the plan endpoint', async () => {
+    const shop = await registerShop({ shopName: 'Expired Trial Shop', email: 'owner@expired.bd' });
+
+    const past = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await TenantModel.findByIdAndUpdate(shop.tenantId, {
+      $set: { planExpiresAt: past, trialEndsAt: past },
+    });
+
+    const planRes = await request(app)
+      .get('/api/v1/billing/plan')
+      .set('Authorization', `Bearer ${shop.accessToken}`);
+    expect(planRes.status).toBe(200);
+    expect(planRes.body.data.plan).toBe('free');
+    expect(planRes.body.data.limits.maxProducts).toBe(100);
+  });
+
+  // 16. Period validation
+  it('16. Billing: an unknown period is rejected with 400, never silently billed monthly', async () => {
+    const shop = await registerShop({ shopName: 'Bad Period Shop', email: 'owner@badperiod.bd' });
+
+    const res = await request(app)
+      .post('/api/v1/billing/sslcommerz/init')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({ period: 'yearly' });
+    expect(res.status).toBe(400);
   });
 });

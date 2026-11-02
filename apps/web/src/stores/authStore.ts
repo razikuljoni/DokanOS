@@ -16,6 +16,9 @@ export interface AuthTenant {
   type: ShopType;
   plan: PlanType;
   planExpiresAt: string | null;
+  // Present on fresh registrations (Pro trial); auth login/refresh responses
+  // omit it, so the billing page reads trial state from /billing/plan instead.
+  trialEndsAt?: string | null;
   settings: {
     lowStockThreshold: number;
     currency: string;

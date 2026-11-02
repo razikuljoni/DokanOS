@@ -4,6 +4,7 @@ import mongoose, { Types } from 'mongoose';
 import bcrypt from 'bcryptjs';
 import {
   ERROR_CODES,
+  TRIAL_DAYS,
   loginSchema,
   registerSchema,
 } from '@dokanos/shared';
@@ -73,6 +74,10 @@ authRouter.post('/register', async (req, res, next) => {
       const tenantId = new Types.ObjectId();
       const ownerId = new Types.ObjectId();
 
+      // New shops start on a real 14-day Pro trial: full Pro limits until
+      // trialEndsAt, then requireTenant treats the plan as free automatically.
+      const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+
       await TenantModel.create(
         [
           {
@@ -80,8 +85,9 @@ authRouter.post('/register', async (req, res, next) => {
             name: parsed.shopName,
             slug,
             type: parsed.shopType,
-            plan: 'free',
-            planExpiresAt: null,
+            plan: 'pro',
+            planExpiresAt: trialEndsAt,
+            trialEndsAt,
             ownerId,
             settings: {
               lowStockThreshold: 10,
@@ -151,6 +157,7 @@ authRouter.post('/register', async (req, res, next) => {
         type: tenant?.type,
         plan: tenant?.plan,
         planExpiresAt: tenant?.planExpiresAt,
+        trialEndsAt: tenant?.trialEndsAt ?? null,
         settings: tenant?.settings,
       },
     });
