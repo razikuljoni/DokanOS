@@ -956,4 +956,49 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
       .send({ period: 'yearly' });
     expect(res.status).toBe(400);
   });
+
+  // 17. Auth normalization (Codex review on PR #14)
+  it('17. Auth: expired-trial sign-in, /me, and refresh return effective free, not stored pro', async () => {
+    const regRes = await request(app)
+      .post('/api/v1/auth/register')
+      .send({
+        shopName: 'Expired Auth Shop',
+        shopType: 'pharmacy',
+        ownerName: 'Expired Auth Shop Owner',
+        email: 'owner@expiredauth.bd',
+        password: 'ExpiredAuth123!',
+      });
+    expect(regRes.status).toBe(201);
+    const tenantId = regRes.body.tenant.id as string;
+
+    const past = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await TenantModel.findByIdAndUpdate(tenantId, {
+      $set: { planExpiresAt: past, trialEndsAt: past },
+    });
+
+    // The stored row still says pro: normalization happens in responses, not the DB.
+    const stored = await TenantModel.findById(tenantId).lean();
+    expect(stored?.plan).toBe('pro');
+
+    const loginRes = await request(app).post('/api/v1/auth/login').send({
+      email: 'owner@expiredauth.bd',
+      password: 'ExpiredAuth123!',
+    });
+    expect(loginRes.status).toBe(200);
+    expect(loginRes.body.tenant.plan).toBe('free');
+
+    const meRes = await request(app)
+      .get('/api/v1/auth/me')
+      .set('Authorization', `Bearer ${loginRes.body.accessToken as string}`);
+    expect(meRes.status).toBe(200);
+    expect(meRes.body.tenant.plan).toBe('free');
+
+    const loginCookies = loginRes.headers['set-cookie'];
+    const rawCookie = Array.isArray(loginCookies) ? loginCookies[0] : loginCookies;
+    const refreshRes = await request(app)
+      .post('/api/v1/auth/refresh')
+      .set('Cookie', rawCookie);
+    expect(refreshRes.status).toBe(200);
+    expect(refreshRes.body.tenant.plan).toBe('free');
+  });
 });
