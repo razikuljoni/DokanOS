@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import jwt from 'jsonwebtoken';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import mongoose from 'mongoose';
@@ -1876,5 +1877,104 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
     expect(listAfter.status).toBe(200);
     expect(listAfter.body.data.length).toBe(1);
     expect(listAfter.body.data[0].name).toBe('Incepta Pharmaceuticals PLC');
+  });
+
+  // 33. Phase 7 — Health Check & Database Probes
+  it('33. Phase 7 Health: /health reports database connection and service statuses', async () => {
+    const res = await request(app).get('/health');
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.services?.database).toBe('connected');
+
+    const apiV1Res = await request(app).get('/api/v1/health');
+    expect(apiV1Res.status).toBe(200);
+    expect(apiV1Res.body.ok).toBe(true);
+    expect(apiV1Res.body.services?.database).toBe('connected');
+  });
+
+  // 34. Phase 7 — Auth Hardening Negative Checks
+  it('34. Phase 7 Auth: malformed tokens, expired tokens, and disabled users are rejected with 401', async () => {
+    const shop = await registerShop({
+      shopName: 'Auth Negatives Shop',
+      email: 'authneg@dokanos.bd',
+    });
+
+    // 1. Malformed token
+    const malformedRes = await request(app)
+      .get('/api/v1/products')
+      .set('Authorization', 'Bearer definitely-not-a-valid-jwt-token');
+    expect(malformedRes.status).toBe(401);
+    expect(malformedRes.body.error?.message).toMatch(/expired or invalid/i);
+
+    // 2. Expired token
+    const expiredToken = jwt.sign(
+      {
+        sub: shop.userId,
+        role: 'owner',
+        tenantId: shop.tenantId,
+        email: 'authneg@dokanos.bd',
+        name: 'Owner',
+      },
+      env.JWT_ACCESS_SECRET,
+      { expiresIn: '-10s' },
+    );
+    const expiredRes = await request(app)
+      .get('/api/v1/products')
+      .set('Authorization', `Bearer ${expiredToken}`);
+    expect(expiredRes.status).toBe(401);
+    expect(expiredRes.body.error?.message).toMatch(/expired or invalid/i);
+
+    // 3. Disabled user account
+    await UserModel.findByIdAndUpdate(shop.userId, { status: 'disabled' });
+    const disabledRes = await request(app)
+      .get('/api/v1/products')
+      .set('Authorization', `Bearer ${shop.accessToken}`);
+    expect(disabledRes.status).toBe(401);
+    expect(disabledRes.body.error?.message).toMatch(/deactivated/i);
+  });
+
+  // 35. Phase 7 — Background Scheduler & Expiry Sweep
+  it('35. Phase 7 Worker: subscription-expiry job downgrades expired trials and emits notification', async () => {
+    const shop = await registerShop({
+      shopName: 'Worker Expiry Shop',
+      email: 'workerexp@dokanos.bd',
+    });
+
+    // Simulate an expired trial
+    const pastDate = new Date(Date.now() - 3600000);
+    await TenantModel.findByIdAndUpdate(shop.tenantId, {
+      plan: 'pro',
+      planExpiresAt: pastDate,
+      trialEndsAt: pastDate,
+    });
+
+    // Run the subscription-expiry job for this tenant
+    const result = await executeJobForTenant('subscription-expiry', shop.tenantId);
+    expect(result).toMatch(/Downgraded .* to free plan/i);
+
+    // Verify stored row is downgraded to free
+    const updatedTenant = await TenantModel.findById(shop.tenantId);
+    expect(updatedTenant?.plan).toBe('free');
+
+    // Verify notification was created
+    const notification = await NotificationModel.findOne({
+      tenantId: shop.tenantId,
+      type: 'subscription',
+    });
+    expect(notification).not.toBeNull();
+    expect(notification?.title).toMatch(/Free Plan/i);
+  });
+
+  // 36. Phase 7 — Security Headers & CORS Checks
+  it('36. Phase 7 Security: Helmet sets nosniff headers and CORS disallows unauthorized origins', async () => {
+    // 1. Nosniff and security headers
+    const healthRes = await request(app).get('/health');
+    expect(healthRes.headers['x-content-type-options']).toBe('nosniff');
+
+    // 2. Disallowed origin receives no access-control-allow-origin header
+    const corsRes = await request(app)
+      .get('/health')
+      .set('Origin', 'https://malicious-phishing-site.com');
+    expect(corsRes.headers['access-control-allow-origin']).toBeUndefined();
   });
 });

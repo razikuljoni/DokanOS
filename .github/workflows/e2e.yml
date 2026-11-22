@@ -2,7 +2,9 @@ name: E2E Smoke Tests (Chromium)
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
 
 jobs:
   e2e:

@@ -18,10 +18,10 @@
 - **Live App:** [https://dokanos.onrender.com](https://dokanos.onrender.com) *(or run locally with `pnpm dev`)*
 - **Live API Health:** [https://dokanos.onrender.com/health](https://dokanos.onrender.com/health)
 - **One-Click Demo Shop:** Click **"Try the demo shop"** on `/` or `/login` to sign directly into **Rahim Pharmacy (Mirpur-10, Dhaka)**—a pre-seeded Pro-plan pharmacy with 22 products, 3 suppliers, 45 days of sales history, and 8 open Baki accounts.
-- **Demo Accounts:**
+- **Demo Accounts (all accounts use Demo1234!):**
   - **Owner:** `demo@dokan-os.demo` / `Demo1234!`
-  - **Manager:** `manager@dokan-os.demo` / `Manager1234!`
-  - **Counter Staff:** `staff@dokan-os.demo` / `Staff1234!`
+  - **Manager:** `manager@dokan-os.demo` / `Demo1234!`
+  - **Counter Staff:** `staff@dokan-os.demo` / `Demo1234!`
 
 > **Free-Tier Wake-Up Note:** *First load may take up to a minute — the free server wakes up.* (Hosted on Render Free Web Service + Vercel Hobby + MongoDB Atlas M0 + Upstash Redis Free).
 
@@ -44,10 +44,10 @@ DokanOS solves the three hardest operational problems for a single-counter or mu
 | :--- | :--- | :--- |
 | **Monorepo & Types** | `pnpm` workspaces, TypeScript 5.8 (`strict: true`, `noUncheckedIndexedAccess: true`) | End-to-end type safety across `@dokanos/shared`, `apps/api`, and `apps/web`. |
 | **Frontend** | React 19, Vite 6, Tailwind CSS v4, shadcn/ui primitives, TanStack Query v5, Zustand, React Hook Form, Recharts, `vite-plugin-pwa` | Fast counter UX, "Modern Ledger" warm-paper design system (`#FAF7F2` / `#1C1917` / `#14532D`), and offline outbox support. |
-| **Backend** | Node.js 22, Express 5, Mongoose 8, Socket.io, Pino, Helmet, `express-rate-limit` | Native async error propagation in Express 5, replica-set transactions, and tenant-scoped realtime rooms. |
-| **Database & Cache** | MongoDB Atlas M0 (512 MB replica set), Upstash Redis (free tier), BullMQ | Multi-document ACID transactions on M0 and serverless Redis for cache-aside + scheduled jobs. |
-| **Payments & Email** | SSLCommerz Sandbox (BDT primary), Stripe Test Mode (secondary), bKash 501 stub, Resend Free Sandbox | Realistic Bangladeshi merchant checkout + international test card support at zero cost. |
-| **Testing & CI/CD** | Vitest, Supertest, `mongodb-memory-server` (`MongoMemoryReplSet`), Playwright, GitHub Actions | Runs real multi-document MongoDB transactions in CI without external database dependencies. |
+| **Backend** | Node.js 22, Express 5, Mongoose 9, Socket.io, Structured JSON Logging, Helmet, `express-rate-limit` | Native async error propagation in Express 5, replica-set transactions, and tenant-scoped realtime rooms. |
+| **Database & Cache** | MongoDB Atlas M0 (512 MB replica set), Upstash Redis (free tier), In-process BullMQ / Cron | Multi-document ACID transactions on M0 and serverless Redis for cache-aside + scheduled jobs. |
+| **Payments & Email** | SSLCommerz Sandbox (BDT primary), Stripe Test Mode (secondary), Resend Free Sandbox | Bangladeshi merchant checkout + test card support with webhook signature verification. |
+| **Testing & CI/CD** | Vitest, Supertest, `mongodb-memory-server` (`MongoMemoryReplSet`), Playwright, GitHub Actions | 41+ passing integration and isolation tests in CI without external database dependencies. |
 
 ---
 

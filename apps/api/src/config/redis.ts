@@ -58,6 +58,21 @@ export function initRedis(): Redis | null {
   }
 }
 
+export async function checkRedisHealth(): Promise<'connected' | 'degraded' | 'disabled'> {
+  if (!env.UPSTASH_REDIS_URL || env.NODE_ENV === 'test') {
+    return 'disabled';
+  }
+  if (!redisClient || !redisAvailable) {
+    return 'degraded';
+  }
+  try {
+    const res = await redisClient.ping();
+    return res === 'PONG' ? 'connected' : 'degraded';
+  } catch {
+    return 'degraded';
+  }
+}
+
 export async function cacheGet<T>(key: string): Promise<T | null> {
   if (redisClient && redisAvailable) {
     try {

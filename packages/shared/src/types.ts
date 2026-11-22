@@ -71,5 +71,10 @@ export interface PaginatedResponse<T> {
 }
 
 export interface HealthResponse {
-  ok: true;
+  ok: boolean;
+  services?: {
+    database: 'connected' | 'disconnected';
+    redis?: 'connected' | 'degraded' | 'disabled';
+  };
+  error?: string;
 }

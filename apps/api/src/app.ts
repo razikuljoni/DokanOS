@@ -2,8 +2,10 @@ import express, { type Express } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import mongoose from 'mongoose';
 import type { HealthResponse } from '@dokanos/shared';
 import { env } from './config/env.js';
+import { checkRedisHealth } from './config/redis.js';
 import { globalRateLimiter, authRateLimiter } from './middleware/rateLimit.js';
 import { errorHandler, notFoundHandler } from './middleware/error.js';
 import { authRouter } from './modules/auth/routes.js';
@@ -66,15 +68,35 @@ export function createApiApp(): Express {
     app.use('/api', globalRateLimiter);
   }
 
-  app.get('/health', (_req, res) => {
-    const response: HealthResponse = { ok: true };
-    res.status(200).json(response);
-  });
+  const healthHandler = async (_req: express.Request, res: express.Response) => {
+    const isDbConnected = mongoose.connection.readyState === 1;
+    const redisStatus = await checkRedisHealth();
 
-  app.get('/api/v1/health', (_req, res) => {
-    const response: HealthResponse = { ok: true };
+    if (!isDbConnected) {
+      const response: HealthResponse = {
+        ok: false,
+        services: {
+          database: 'disconnected',
+          redis: redisStatus,
+        },
+        error: 'Database connection offline',
+      };
+      res.status(503).json(response);
+      return;
+    }
+
+    const response: HealthResponse = {
+      ok: true,
+      services: {
+        database: 'connected',
+        redis: redisStatus,
+      },
+    };
     res.status(200).json(response);
-  });
+  };
+
+  app.get('/health', healthHandler);
+  app.get('/api/v1/health', healthHandler);
 
   // Apply stricter auth limiting outside test runs.
   if (env.NODE_ENV !== 'test') {

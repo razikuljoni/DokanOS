@@ -1,15 +1,31 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, afterAll } from 'vitest';
 import request from 'supertest';
 import { ERROR_CODES } from '@dokanos/shared';
 import { createApiApp } from '../src/app.js';
+import { connectDatabase, disconnectDatabase } from '../src/config/db.js';
 
-describe('Phase 0 — API Skeleton & Health Check', () => {
+describe('API Health Check & Probes', () => {
   const app = createApiApp();
 
-  it('GET /health returns { ok: true } with status 200', async () => {
+  afterAll(async () => {
+    await disconnectDatabase();
+  });
+
+  it('GET /health returns 503 when primary database is disconnected', async () => {
+    await disconnectDatabase();
+    const res = await request(app).get('/health');
+    expect(res.status).toBe(503);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.error).toBe('Database connection offline');
+    expect(res.body.services?.database).toBe('disconnected');
+  });
+
+  it('GET /health returns 200 and database connected when DB is online', async () => {
+    await connectDatabase();
     const res = await request(app).get('/health');
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true });
+    expect(res.body.ok).toBe(true);
+    expect(res.body.services?.database).toBe('connected');
   });
 
   it('GET /api/v1/unknown returns 404 with standard error envelope', async () => {

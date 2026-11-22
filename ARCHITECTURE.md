@@ -92,7 +92,7 @@ DokanOS/
 ├── apps/
 │   ├── api/             # Express 5 backend server & domain models
 │   │   ├── src/
-│   │   │   ├── middleware/   # Auth, tenant, rate limits, RBAC, Pino
+│   │   │   ├── middleware/   # Auth, tenant, rate limits, RBAC, error handling
 │   │   │   ├── modules/      # Sales, Stock, Dues, Purchases, Auth routes
 │   │   │   ├── models/       # Mongoose schemas & indexes
 │   │   │   └── server.ts     # Server bootstrapper & database session initialization
