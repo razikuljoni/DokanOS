@@ -2,6 +2,7 @@ import { Router } from 'express';
 import mongoose, { Types } from 'mongoose';
 import { recordDuePaymentSchema } from '@dokanos/shared';
 import {
+  CustomerModel,
   DuePaymentModel,
   PurchaseModel,
   SaleModel,
@@ -253,6 +254,27 @@ duesRouter.post('/:refId/payments', requirePermission('dues:write'), async (req,
         sale.dueAmount = Number((sale.dueAmount - applied).toFixed(2));
         sale.paymentStatus = sale.dueAmount === 0 ? 'paid' : 'partial';
         await sale.save({ session });
+
+        // Decrement Customer balanceDue
+        if (sale.customerId) {
+          const cust = await CustomerModel.findOne({
+            _id: sale.customerId,
+            tenantId: tenantObjectId,
+          }).session(session);
+          if (cust) {
+            cust.balanceDue = Number(Math.max(0, cust.balanceDue - applied).toFixed(2));
+            await cust.save({ session });
+          }
+        } else if (sale.customerPhone) {
+          const cust = await CustomerModel.findOne({
+            tenantId: tenantObjectId,
+            phone: sale.customerPhone,
+          }).session(session);
+          if (cust) {
+            cust.balanceDue = Number(Math.max(0, cust.balanceDue - applied).toFixed(2));
+            await cust.save({ session });
+          }
+        }
 
         const [doc] = await DuePaymentModel.create(
           [

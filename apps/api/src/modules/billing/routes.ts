@@ -27,6 +27,7 @@ import { requireTenant } from '../../middleware/tenant.js';
 import { requirePermission } from '../../middleware/rbac.js';
 import { AppError } from '../../utils/errors.js';
 import { env } from '../../config/env.js';
+import { logger } from '../../config/logger.js';
 import { emitToTenant } from '../../realtime/socket.js';
 import { recordAuditLog } from '../../utils/audit.js';
 import { sendResendEmail } from '../notifications/routes.js';
@@ -570,6 +571,8 @@ class StripeTestBillingProvider implements BillingProvider {
 
     if (
       event.type !== 'checkout.session.completed' &&
+      event.type !== 'checkout.session.async_payment_succeeded' &&
+      event.type !== 'checkout.session.async_payment_failed' &&
       event.type !== 'payment_intent.succeeded'
     ) {
       return { processed: false, duplicate: false, tranId: event.id };
@@ -579,6 +582,7 @@ class StripeTestBillingProvider implements BillingProvider {
       id?: string;
       metadata?: { tranId?: string };
       client_reference_id?: string;
+      payment_status?: string;
     };
     const tranId =
       sessionObj.metadata?.tranId ??
@@ -588,6 +592,38 @@ class StripeTestBillingProvider implements BillingProvider {
 
     if (!tranId) {
       throw AppError.badRequest('Missing Stripe transaction identifier');
+    }
+
+    // Handle asynchronous payment failure
+    if (event.type === 'checkout.session.async_payment_failed') {
+      const failedPayment = await PaymentModel.findOneAndUpdate(
+        {
+          provider: 'stripe',
+          eventId: tranId,
+          status: 'pending',
+        },
+        {
+          $set: {
+            status: 'failed',
+            raw: event,
+          },
+        },
+        { new: true },
+      );
+      return { processed: Boolean(failedPayment), duplicate: false, tranId };
+    }
+
+    // Delayed payments: if completed but payment_status is not 'paid', wait for async_payment_succeeded
+    if (
+      event.type === 'checkout.session.completed' &&
+      sessionObj.payment_status &&
+      sessionObj.payment_status !== 'paid'
+    ) {
+      logger.info('Stripe checkout completed with unpaid status; awaiting async confirmation', {
+        tranId,
+        paymentStatus: sessionObj.payment_status,
+      });
+      return { processed: false, duplicate: false, tranId };
     }
 
     const session = await mongoose.startSession();
