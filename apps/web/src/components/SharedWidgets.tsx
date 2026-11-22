@@ -5,16 +5,11 @@ export { EmptyState } from './EmptyState';
 export { LowStockBanner } from './LowStockBanner';
 export { ConfirmDialog } from './ConfirmDialog';
 export { DataTable, type DataTableColumn } from './DataTable';
-export { NotificationBell } from './NotificationBell';
-export { Toast } from './Toast';
 export { Skeleton } from './Skeleton';
-export { DuePaymentDialog, type DuePaymentDialogTarget } from './DuePaymentDialog';
-export { ProductForm } from './ProductForm';
-export { SaleForm } from './SaleForm';
+export { ErrorBoundary } from './ErrorBoundary';
 export {
   ThermalReceipt,
   type PrintableSale,
   type PrintableSaleItem,
   type ThermalPaperWidth,
 } from './ThermalReceipt';
-

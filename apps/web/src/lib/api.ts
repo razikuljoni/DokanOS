@@ -33,8 +33,12 @@ export async function tryRefreshSession(): Promise<string | null> {
         headers: { 'Content-Type': 'application/json' },
       });
 
-      if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
         useAuthStore.getState().clearAuth();
+        return null;
+      }
+
+      if (!res.ok) {
         return null;
       }
 

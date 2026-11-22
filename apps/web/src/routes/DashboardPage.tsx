@@ -84,8 +84,10 @@ interface SalesTrendPoint {
 const CHART_COLORS = ['#14532D', '#B45309', '#57534E', '#1C1917', '#78716C'];
 
 export function DashboardPage(): React.ReactElement {
+  const user = useAuthStore((s) => s.user);
   const tenant = useAuthStore((s) => s.tenant);
   const isOffline = useIsOffline();
+  const isStaff = user?.role === 'staff';
 
   const { data: summaryRes, isLoading: summaryLoading } = useQuery({
     queryKey: ['dashboard', tenant?.id, 'summary', isOffline ? 'offline' : 'online'],
@@ -321,13 +323,23 @@ export function DashboardPage(): React.ReactElement {
           subtext={`${summary?.salesCount ?? 0} completed invoices`}
           loading={summaryLoading}
         />
-        <StatCard
-          label="Net Profit (Revenue − COGS)"
-          value={formatBDT(summary?.profit ?? 0)}
-          subtext={`Avg bill ${formatBDT(summary?.averageBill ?? 0)}`}
-          tone="primary"
-          loading={summaryLoading}
-        />
+        {!isStaff ? (
+          <StatCard
+            label="Net Profit (Revenue − COGS)"
+            value={formatBDT(summary?.profit ?? 0)}
+            subtext={`Avg bill ${formatBDT(summary?.averageBill ?? 0)}`}
+            tone="primary"
+            loading={summaryLoading}
+          />
+        ) : (
+          <StatCard
+            label="Average Bill Amount"
+            value={formatBDT(summary?.averageBill ?? 0)}
+            subtext="Per completed counter invoice"
+            tone="primary"
+            loading={summaryLoading}
+          />
+        )}
         <StatCard
           label="Customer Baki Receivable"
           value={formatBDT(summary?.duesOutstanding.receivable ?? 0)}
@@ -335,13 +347,23 @@ export function DashboardPage(): React.ReactElement {
           tone={(summary?.duesOutstanding.receivable ?? 0) > 0 ? 'warning' : 'default'}
           loading={summaryLoading}
         />
-        <StatCard
-          label="Supplier Baki Payable"
-          value={formatBDT(summary?.duesOutstanding.payable ?? 0)}
-          subtext={`${summary?.lowStockCount ?? 0} low-stock items to reorder`}
-          tone={(summary?.lowStockCount ?? 0) > 0 ? 'danger' : 'default'}
-          loading={summaryLoading}
-        />
+        {!isStaff ? (
+          <StatCard
+            label="Supplier Baki Payable"
+            value={formatBDT(summary?.duesOutstanding.payable ?? 0)}
+            subtext={`${summary?.lowStockCount ?? 0} low-stock items to reorder`}
+            tone={(summary?.lowStockCount ?? 0) > 0 ? 'danger' : 'default'}
+            loading={summaryLoading}
+          />
+        ) : (
+          <StatCard
+            label="Low Stock Items"
+            value={String(summary?.lowStockCount ?? 0)}
+            subtext="Items requiring manager reorder"
+            tone={(summary?.lowStockCount ?? 0) > 0 ? 'warning' : 'default'}
+            loading={summaryLoading}
+          />
+        )}
       </div>
 
       {/* Charts Row: Daily Revenue Line Chart + Category Breakdown */}

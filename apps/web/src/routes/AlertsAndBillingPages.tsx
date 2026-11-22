@@ -359,7 +359,12 @@ export function AlertsPage(): React.ReactElement {
               <ArrowUpRight className="h-3 w-3" />
             </Button>
           </Link>
-          <Link to="/app/purchases">
+          <Link
+            to={`/app/purchases?productId=${row._id}&qty=${Math.max(
+              1,
+              (thresholdMode === 'custom' ? parsedCustomThreshold : row.lowStockAt) - row.stock + 1,
+            )}`}
+          >
             <Button variant="secondary" size="sm" className="h-7 px-2 text-xs">
               <ShoppingCart className="h-3 w-3" />
               Restock
@@ -619,16 +624,28 @@ export function AlertsPage(): React.ReactElement {
 
       {/* Real-time Notification Feed */}
       <section aria-labelledby="notifications-feed-heading" className="space-y-4">
-        <div className="border-b border-border pb-2">
-          <h2
-            id="notifications-feed-heading"
-            className="font-display text-lg font-bold tracking-tight"
-          >
-            Activity & System Notifications Feed
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            Chronological log of triggered low-stock alerts, Baki due reminders, and billing events.
-          </p>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-border pb-2 gap-2">
+          <div>
+            <h2
+              id="notifications-feed-heading"
+              className="font-display text-lg font-bold tracking-tight"
+            >
+              Activity & System Notifications Feed
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              Chronological log of triggered low-stock alerts, Baki due reminders, and billing events.
+            </p>
+          </div>
+          {items.some((i) => !i.isRead) && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={markAllReadMutation.isPending}
+              onClick={() => markAllReadMutation.mutate()}
+            >
+              Mark All Alerts Read
+            </Button>
+          )}
         </div>
 
         {isLoading ? (

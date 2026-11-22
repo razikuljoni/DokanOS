@@ -494,7 +494,9 @@ salesRouter.post('/:id/return', requirePermission('sales:return'), async (req, r
 
     await invalidateTenantCache(req.tenant!.id);
 
-    const updated = await SaleModel.findById(saleObjectId).lean();
+    const updated = await SaleModel.findById(saleObjectId)
+      .populate('soldBy', 'name role')
+      .lean();
     res.status(200).json({ data: updated });
   } catch (err) {
     next(err);

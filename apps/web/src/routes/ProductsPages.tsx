@@ -78,6 +78,7 @@ export function ProductsListPage(): React.ReactElement {
         const list = (snap?.data ?? []).filter((p) => {
           if (stockStatus === 'low' && !(p.stock > 0 && p.stock <= p.lowStockAt)) return false;
           if (stockStatus === 'out' && p.stock !== 0) return false;
+          if (stockStatus === 'ok' && !(p.stock > p.lowStockAt)) return false;
           if (!search.trim()) return true;
           const q = search.trim().toLowerCase();
           return (

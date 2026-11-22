@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Edit2, Plus, Trash2, Truck, X } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
@@ -41,6 +42,7 @@ export function PurchasesPage(): React.ReactElement {
   const tenant = useAuthStore((s) => s.tenant);
   const addToast = useUiStore((s) => s.addToast);
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [modalOpen, setModalOpen] = useState(false);
   const [supplierId, setSupplierId] = useState('');
@@ -48,6 +50,19 @@ export function PurchasesPage(): React.ReactElement {
   const [qty, setQty] = useState(20);
   const [costPrice, setCostPrice] = useState(120);
   const [paidAmount, setPaidAmount] = useState(1000);
+
+  useEffect(() => {
+    const paramProd = searchParams.get('productId');
+    const paramQty = searchParams.get('qty');
+    if (paramProd) {
+      setProductId(paramProd);
+      if (paramQty && Number(paramQty) > 0) {
+        setQty(Number(paramQty));
+      }
+      setModalOpen(true);
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const { data: purchasesRes, isLoading } = useQuery({
     queryKey: ['purchases', tenant?.id],
@@ -272,9 +287,15 @@ export function PurchasesPage(): React.ReactElement {
                   id="po-paid"
                   type="number"
                   min={0}
+                  max={qty * costPrice}
                   value={paidAmount}
                   onChange={(e) => setPaidAmount(Number(e.target.value))}
                 />
+                {paidAmount > qty * costPrice && (
+                  <div className="text-xs text-destructive font-medium pt-1">
+                    Amount paid cannot exceed total purchase cost of {formatBDT(qty * costPrice)}.
+                  </div>
+                )}
               </div>
             </div>
 
@@ -284,7 +305,15 @@ export function PurchasesPage(): React.ReactElement {
               </Button>
               <Button
                 size="sm"
-                disabled={createPurchaseMutation.isPending}
+                disabled={
+                  createPurchaseMutation.isPending ||
+                  qty < 1 ||
+                  costPrice < 0 ||
+                  paidAmount < 0 ||
+                  paidAmount > qty * costPrice ||
+                  (!supplierId && suppliers.length === 0) ||
+                  (!productId && products.length === 0)
+                }
                 onClick={() => createPurchaseMutation.mutate()}
               >
                 {createPurchaseMutation.isPending ? 'Receiving...' : 'Receive & Update Stock'}

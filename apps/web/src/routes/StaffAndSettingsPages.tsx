@@ -1014,81 +1014,15 @@ export function SettingsPage(): React.ReactElement {
                     max={10000}
                     disabled={!canWriteTenant}
                     value={threshold}
-                    onChange={(e) => setThreshold(Number(e.target.value))}
+                    onChange={(e) => {
+                      const val = e.target.value === '' ? 0 : Math.max(0, parseInt(e.target.value, 10) || 0);
+                      setThreshold(val);
+                    }}
                     className="bg-card border-input text-foreground font-mono text-xs tabular-nums"
                   />
                 </div>
 
-                {/* Row 2 Col 1: Physical Location & Holding (UNCONNECTED in backend schema) */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <Label
-                      htmlFor="set-location-unconnected"
-                      className="text-[10px] font-mono uppercase tracking-wider font-semibold text-muted-foreground"
-                    >
-                      PHYSICAL LOCATION &amp; HOLDING
-                    </Label>
-                    <span className="rounded border border-warning/30 bg-warning/15 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-warning">
-                      Unconnected
-                    </span>
-                  </div>
-                  <Input
-                    id="set-location-unconnected"
-                    value=""
-                    placeholder="Unconnected — address field not in Tenant schema"
-                    disabled
-                    readOnly
-                    className="bg-secondary/50 border-border text-xs text-muted-foreground"
-                  />
-                </div>
-
-                {/* Row 2 Col 2: Official Helpline / SMS Gateway (UNCONNECTED in backend schema) */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <Label
-                      htmlFor="set-helpline-unconnected"
-                      className="text-[10px] font-mono uppercase tracking-wider font-semibold text-muted-foreground"
-                    >
-                      OFFICIAL HELPLINE / SMS GATEWAY
-                    </Label>
-                    <span className="rounded border border-warning/30 bg-warning/15 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-warning">
-                      NoOp SMS Stub
-                    </span>
-                  </div>
-                  <Input
-                    id="set-helpline-unconnected"
-                    value=""
-                    placeholder="Unconnected — phone/OTP field not in Tenant schema"
-                    disabled
-                    readOnly
-                    className="bg-secondary/50 border-border text-xs text-muted-foreground"
-                  />
-                </div>
-
-                {/* Row 2 Col 3: Trade License & DGDA Reg (UNCONNECTED in backend schema) */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <Label
-                      htmlFor="set-dgda-unconnected"
-                      className="text-[10px] font-mono uppercase tracking-wider font-semibold text-muted-foreground"
-                    >
-                      TRADE LICENSE &amp; DGDA REG
-                    </Label>
-                    <span className="rounded border border-warning/30 bg-warning/15 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-warning">
-                      Unconnected
-                    </span>
-                  </div>
-                  <Input
-                    id="set-dgda-unconnected"
-                    value=""
-                    placeholder="Unconnected — tradeLicense not in Tenant schema"
-                    disabled
-                    readOnly
-                    className="bg-secondary/50 border-border text-xs text-muted-foreground"
-                  />
-                </div>
-
-                {/* Row 3 Col 1: Base Ledger Currency (LIVE: settings.currency) */}
+                {/* Row 2 Col 1: Base Ledger Currency (LIVE: settings.currency) */}
                 <div className="space-y-1.5">
                   <Label
                     htmlFor="set-currency"
@@ -1105,7 +1039,7 @@ export function SettingsPage(): React.ReactElement {
                   />
                 </div>
 
-                {/* Row 3 Col 2: Fiscal Clock & Timezone (LIVE constant: Asia/Dhaka) */}
+                {/* Row 2 Col 2: Fiscal Clock & Timezone (LIVE constant: Asia/Dhaka) */}
                 <div className="space-y-1.5">
                   <Label
                     htmlFor="set-timezone"
@@ -1122,7 +1056,7 @@ export function SettingsPage(): React.ReactElement {
                   />
                 </div>
 
-                {/* Row 3 Col 3: Billing & Audit Email (LIVE authenticated user email + unconnected shift window note) */}
+                {/* Row 2 Col 3: Billing & Audit Email */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <Label
@@ -1508,9 +1442,9 @@ export function SettingsPage(): React.ReactElement {
             )}
 
             <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Generates a one-time invite token and default password (<code>Staff1234!</code>)
-              enforced by plan staff limits ({usage?.staffCount ?? 0} / {usage?.maxStaff ?? 1}{' '}
-              used).
+              Generates a one-time activation link expiring in 7 days where the staff member chooses
+              their own password. Enforced by plan staff limits ({usage?.staffCount ?? (usersRes?.data.length ?? 1)}{' '}
+              / {usage?.maxStaff ?? 1} allocated).
             </p>
           </CardContent>
         </Card>

@@ -455,23 +455,25 @@ export function OfflineBannerAndDrawer(): React.ReactElement {
             </div>
 
             <div className="pt-4 border-t border-border flex items-center justify-between gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setSimulateOffline(!simulateOffline)}
-              >
-                {simulateOffline ? (
-                  <>
-                    <Wifi className="h-3.5 w-3.5 text-primary" />
-                    Restore Live Connection
-                  </>
-                ) : (
-                  <>
-                    <WifiOff className="h-3.5 w-3.5 text-warning" />
-                    Simulate Shop Outage
-                  </>
-                )}
-              </Button>
+              {import.meta.env.DEV && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSimulateOffline(!simulateOffline)}
+                >
+                  {simulateOffline ? (
+                    <>
+                      <Wifi className="h-3.5 w-3.5 text-primary" />
+                      Restore Live Connection
+                    </>
+                  ) : (
+                    <>
+                      <WifiOff className="h-3.5 w-3.5 text-warning" />
+                      Simulate Shop Outage
+                    </>
+                  )}
+                </Button>
+              )}
               <Button size="sm" onClick={() => setDrawerOpen(false)}>
                 Close
               </Button>

@@ -9,6 +9,7 @@ import {
   FileSpreadsheet,
   LayoutDashboard,
   LogOut,
+  Menu,
   Moon,
   Package,
   PanelLeftClose,
@@ -81,6 +82,7 @@ export function AppShell(): React.ReactElement {
   const navigate = useNavigate();
   const location = useLocation();
   const [globalSearch, setGlobalSearch] = useState('');
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   const { data: unreadData } = useQuery({
     queryKey: ['notifications', tenant?.id, 'unread-count'],
@@ -141,10 +143,98 @@ export function AppShell(): React.ReactElement {
 
   return (
     <div className="min-h-screen flex bg-background text-foreground">
-      {/* Dark Ink Sidebar (#1C1917, white text) per §6 */}
+      {/* Mobile Drawer Overlay */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-50 lg:hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Mobile Navigation"
+        >
+          <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
+            onClick={() => setMobileOpen(false)}
+          />
+          <aside className="fixed inset-y-0 left-0 w-64 bg-[#1C1917] text-[#FAF7F2] border-r border-[#2E2A26] flex flex-col z-10 shadow-2xl">
+            <div className="h-16 px-4 border-b border-[#2E2A26] flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <Link
+                  to="/app/dashboard"
+                  onClick={() => setMobileOpen(false)}
+                  className="font-display text-base font-bold tracking-tight text-white truncate block"
+                >
+                  {tenant?.name ?? 'DokanOS'}
+                </Link>
+                <div className="text-[11px] text-[#A8A29E] truncate">
+                  {tenant?.type ? `${tenant.type.toUpperCase()} LEDGER` : 'SHOP LEDGER'} ·{' '}
+                  {tenant ? tenant.plan.toUpperCase() : '...'}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMobileOpen(false)}
+                aria-label="Close mobile sidebar"
+                className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-md text-[#D6D3D1] hover:bg-[#292524] hover:text-white cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <nav className="flex-1 py-4 px-2.5 space-y-1 overflow-y-auto">
+              {allowedNavItems.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.end}
+                    onClick={() => setMobileOpen(false)}
+                    className={({ isActive }) =>
+                      cn(
+                        'flex items-center gap-3 px-3 py-2.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap min-h-[44px]',
+                        isActive
+                          ? 'bg-[#14532D] text-white'
+                          : 'text-[#D6D3D1] hover:bg-[#292524] hover:text-white',
+                      )
+                    }
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    <span className="truncate">{item.label}</span>
+                  </NavLink>
+                );
+              })}
+            </nav>
+
+            <div className="p-3 border-t border-[#2E2A26] space-y-2 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-medium text-white truncate">{user?.name}</div>
+                  <div className="text-[11px] text-[#A8A29E] truncate">
+                    {user?.role.toUpperCase()}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileOpen(false);
+                    void handleLogout();
+                  }}
+                  title="Sign out"
+                  aria-label="Sign out"
+                  className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-md text-[#A8A29E] hover:bg-[#292524] hover:text-white cursor-pointer"
+                >
+                  <LogOut className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </aside>
+        </div>
+      )}
+
+      {/* Desktop Dark Ink Sidebar (#1C1917, white text) per §6 */}
       <aside
         className={cn(
-          'bg-[#1C1917] text-[#FAF7F2] border-r border-[#2E2A26] flex flex-col shrink-0 transition-all duration-150',
+          'hidden lg:flex bg-[#1C1917] text-[#FAF7F2] border-r border-[#2E2A26] flex-col shrink-0 transition-all duration-150',
           sidebarCollapsed ? 'w-16' : 'w-64',
         )}
       >
@@ -160,7 +250,7 @@ export function AppShell(): React.ReactElement {
               </Link>
               <div className="text-[11px] text-[#A8A29E] truncate">
                 {tenant?.type ? `${tenant.type.toUpperCase()} LEDGER` : 'SHOP LEDGER'} ·{' '}
-                {tenant?.plan.toUpperCase() ?? 'FREE'}
+                {tenant ? tenant.plan.toUpperCase() : '...'}
               </div>
             </div>
           )}
@@ -275,16 +365,27 @@ export function AppShell(): React.ReactElement {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top Bar Contract for Workspace */}
-        <header className="h-16 px-6 border-b border-border bg-card flex items-center justify-between gap-6 shrink-0">
-          <form onSubmit={handleGlobalSearch} className="relative max-w-sm w-full">
-            <Search className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
-            <Input
-              value={globalSearch}
-              onChange={(e) => setGlobalSearch(e.target.value)}
-              placeholder="Search products by name, SKU, or category..."
-              className="pl-9 h-9 text-xs"
-            />
-          </form>
+        <header className="h-16 px-4 sm:px-6 border-b border-border bg-card flex items-center justify-between gap-3 sm:gap-6 shrink-0">
+          <div className="flex items-center gap-2 max-w-sm w-full">
+            <button
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label="Open mobile navigation menu"
+              aria-expanded={mobileOpen}
+              className="lg:hidden p-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-md border border-border bg-card hover:bg-secondary text-foreground shrink-0 cursor-pointer"
+            >
+              <Menu className="h-5 w-5" />
+            </button>
+            <form onSubmit={handleGlobalSearch} className="relative w-full">
+              <Search className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+              <Input
+                value={globalSearch}
+                onChange={(e) => setGlobalSearch(e.target.value)}
+                placeholder="Search products..."
+                className="pl-9 h-9 text-xs"
+              />
+            </form>
+          </div>
 
           <div className="flex items-center gap-2.5 shrink-0">
             <OfflineSyncHeaderControls />
@@ -344,7 +445,10 @@ export function AppShell(): React.ReactElement {
       </div>
 
       {/* Realtime Toast Stack */}
-      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
+      <div
+        aria-live="polite"
+        className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none"
+      >
         <AnimatePresence>
           {toasts.map((t) => (
             <motion.div
