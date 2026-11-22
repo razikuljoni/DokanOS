@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  BILLING_PERIODS,
   BILLING_PROVIDERS,
   PAYMENT_METHODS,
   PLANS,
@@ -111,4 +112,8 @@ export const updateUserStatusSchema = z.object({
 export const billingCheckoutInitSchema = z.object({
   provider: z.enum(BILLING_PROVIDERS),
   plan: z.enum(PLANS).default('pro'),
+  period: z.enum(BILLING_PERIODS).default('monthly'),
+  phone: z.string().optional(),
+  address: z.string().optional(),
+  city: z.string().optional(),
 });

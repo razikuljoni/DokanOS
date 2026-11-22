@@ -390,19 +390,7 @@ export async function seedDemoData(forceReset = false): Promise<void> {
     },
   ]);
 
-  // Seed initial Pro subscription & payment record
-  await PaymentModel.create({
-    tenantId,
-    provider: 'sslcommerz',
-    providerRef: 'DKN-RAHIM-SEED-001',
-    eventId: 'DKN-RAHIM-SEED-001',
-    amount: 499,
-    currency: 'BDT',
-    status: 'paid',
-    purpose: 'subscription',
-    raw: { card_type: 'VISA-Dutch Bangla', val_id: 'VAL-SEED-001' },
-  });
-
+  // Initial Pro subscription record (no fake payment seeded)
   await SubscriptionModel.create({
     tenantId,
     provider: 'sslcommerz',

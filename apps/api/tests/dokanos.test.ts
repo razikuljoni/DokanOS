@@ -1145,4 +1145,85 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
     expect(refreshRes.status).toBe(200);
     expect(refreshRes.body.tenant.plan).toBe('free');
   });
+
+  // 18. Phase 2 — Real Checkout Init with Customer Contact Fields
+  it('18. Phase 2 Billing: SSLCommerz checkout init accepts and stores customer contact fields', async () => {
+    const shop = await registerShop({
+      shopName: 'Contact Checkout Pharmacy',
+      email: 'contact@dokanos.bd',
+    });
+
+    const initRes = await request(app)
+      .post('/api/v1/billing/sslcommerz/init')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({
+        period: 'annual',
+        phone: '01712345678',
+        address: 'House 5, Road 10, Banani',
+        city: 'Dhaka',
+      });
+
+    expect(initRes.status).toBe(201);
+    expect(initRes.body.data.amount).toBe(4200);
+    expect(initRes.body.data.period).toBe('annual');
+    const tranId = initRes.body.data.tranId as string;
+
+    const payment = await PaymentModel.findOne({ provider: 'sslcommerz', eventId: tranId }).lean();
+    expect(payment).not.toBeNull();
+    expect(payment?.amount).toBe(4200);
+    const raw = payment?.raw as { customerInfo?: { phone?: string; address?: string; city?: string } };
+    expect(raw.customerInfo?.phone).toBe('01712345678');
+    expect(raw.customerInfo?.address).toBe('House 5, Road 10, Banani');
+    expect(raw.customerInfo?.city).toBe('Dhaka');
+  });
+
+  // 19. Phase 2 — Reconciliation Job
+  it('19. Phase 2 Reconciliation: POST /api/v1/billing/reconcile marks stale pending payments older than 30m as failed', async () => {
+    const shop = await registerShop({
+      shopName: 'Reconciliation Pharmacy',
+      email: 'reconcile@dokanos.bd',
+    });
+
+    // Create a stale pending payment created 45 minutes ago
+    const staleTranId = `DKN-STALE-${Date.now()}`;
+    const fortyFiveMinsAgo = new Date(Date.now() - 45 * 60 * 1000);
+    await PaymentModel.create({
+      tenantId: shop.tenantId,
+      provider: 'sslcommerz',
+      providerRef: staleTranId,
+      eventId: staleTranId,
+      amount: 499,
+      currency: 'BDT',
+      status: 'pending',
+      purpose: 'subscription',
+      createdAt: fortyFiveMinsAgo,
+    });
+
+    // Create a fresh pending payment created 5 minutes ago
+    const freshTranId = `DKN-FRESH-${Date.now()}`;
+    await PaymentModel.create({
+      tenantId: shop.tenantId,
+      provider: 'sslcommerz',
+      providerRef: freshTranId,
+      eventId: freshTranId,
+      amount: 499,
+      currency: 'BDT',
+      status: 'pending',
+      purpose: 'subscription',
+      createdAt: new Date(Date.now() - 5 * 60 * 1000),
+    });
+
+    const reconcileRes = await request(app)
+      .post('/api/v1/billing/reconcile')
+      .set('Authorization', `Bearer ${shop.accessToken}`);
+
+    expect(reconcileRes.status).toBe(200);
+    expect(reconcileRes.body.data.expired).toBeGreaterThanOrEqual(1);
+
+    const stalePayment = await PaymentModel.findOne({ eventId: staleTranId }).lean();
+    expect(stalePayment?.status).toBe('failed');
+
+    const freshPayment = await PaymentModel.findOne({ eventId: freshTranId }).lean();
+    expect(freshPayment?.status).toBe('pending');
+  });
 });

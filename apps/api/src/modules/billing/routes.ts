@@ -29,13 +29,20 @@ import { AppError } from '../../utils/errors.js';
 import { env } from '../../config/env.js';
 import { emitToTenant } from '../../realtime/socket.js';
 import { recordAuditLog } from '../../utils/audit.js';
+import { sendResendEmail } from '../notifications/routes.js';
 
 // §7 Single BillingProvider interface
 export interface CheckoutSessionResult {
   provider: 'sslcommerz' | 'stripe' | 'bkash';
   gatewayUrl: string;
   tranId: string;
-  mode: 'sandbox' | 'test';
+  mode: 'sandbox' | 'test' | 'live';
+}
+
+export interface CustomerCheckoutInfo {
+  phone?: string;
+  address?: string;
+  city?: string;
 }
 
 export interface BillingProvider {
@@ -44,9 +51,49 @@ export interface BillingProvider {
     user: { name: string; email: string },
     plan: PlanType,
     period: BillingPeriod,
+    customerInfo?: CustomerCheckoutInfo,
   ): Promise<CheckoutSessionResult>;
   handleWebhook(req: Request): Promise<{ processed: boolean; duplicate: boolean; tranId: string }>;
   getSubscription(tenantId: string): Promise<unknown>;
+}
+
+interface PaymentReceiptInfo {
+  shopName: string;
+  amount: number;
+  currency: string;
+  period: BillingPeriod;
+  tranId: string;
+  expiresAt: Date;
+  recipientEmail?: string;
+}
+
+export async function sendPaymentReceiptEmail(params: {
+  to: string;
+  shopName: string;
+  amount: number;
+  currency: string;
+  period: BillingPeriod;
+  tranId: string;
+  provider: string;
+  expiresAt: Date;
+}): Promise<boolean> {
+  const periodLabel = params.period === 'annual' ? 'Annual (365 days)' : 'Monthly (30 days)';
+  return sendResendEmail({
+    to: params.to,
+    subject: `[DokanOS] Payment Receipt: ${params.currency} ${params.amount.toLocaleString()} for ${params.shopName}`,
+    html: `
+      <h2>DokanOS Payment Receipt</h2>
+      <p>Thank you for upgrading your subscription for <strong>${params.shopName}</strong>.</p>
+      <table style="border-collapse:collapse;width:100%;max-width:500px">
+        <tr><td style="padding:8px 0"><strong>Transaction ID:</strong></td><td>${params.tranId}</td></tr>
+        <tr><td style="padding:8px 0"><strong>Gateway:</strong></td><td>${params.provider.toUpperCase()}</td></tr>
+        <tr><td style="padding:8px 0"><strong>Plan / Period:</strong></td><td>DokanOS Pro (${periodLabel})</td></tr>
+        <tr><td style="padding:8px 0"><strong>Amount Paid:</strong></td><td>${params.currency} ${params.amount.toLocaleString()}</td></tr>
+        <tr><td style="padding:8px 0"><strong>Valid Until:</strong></td><td>${params.expiresAt.toISOString().slice(0, 10)}</td></tr>
+      </table>
+      <p style="margin-top:16px">Manage your billing anytime at <a href="${frontendBaseUrl()}/app/billing">DokanOS Billing Portal</a>.</p>
+    `,
+  });
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -162,6 +209,7 @@ export async function validateAndApplySslCommerzPayment(params: {
 
   const session = await mongoose.startSession();
   let wasUpdated = false;
+  const receiptRef: { current: PaymentReceiptInfo | null } = { current: null };
 
   try {
     await session.withTransaction(async () => {
@@ -237,9 +285,36 @@ export async function validateAndApplySslCommerzPayment(params: {
       );
 
       emitToTenant(tenant._id.toString(), 'notification:new', notification);
+
+      const owner = await UserModel.findOne({ tenantId: tenant._id, role: 'owner' })
+        .session(session)
+        .lean();
+      receiptRef.current = {
+        shopName: tenant.name,
+        amount: existingPayment.amount,
+        currency: existingPayment.currency,
+        period,
+        tranId,
+        expiresAt: newExpiresAt,
+        recipientEmail: owner?.email,
+      };
     });
   } finally {
     await session.endSession();
+  }
+
+  const receipt = receiptRef.current;
+  if (wasUpdated && receipt?.recipientEmail) {
+    void sendPaymentReceiptEmail({
+      to: receipt.recipientEmail,
+      shopName: receipt.shopName,
+      amount: receipt.amount,
+      currency: receipt.currency,
+      period: receipt.period,
+      tranId: receipt.tranId,
+      provider: 'sslcommerz',
+      expiresAt: receipt.expiresAt,
+    });
   }
 
   return {
@@ -256,6 +331,7 @@ class SslCommerzBillingProvider implements BillingProvider {
     user: { name: string; email: string },
     _plan: PlanType,
     period: BillingPeriod,
+    customerInfo?: CustomerCheckoutInfo,
   ): Promise<CheckoutSessionResult> {
     const tranId = `DKN-${tenant.slug.toUpperCase().slice(0, 10)}-${Date.now()}`;
     const amount = BILLING_PERIOD_PRICE_BDT[period];
@@ -270,57 +346,84 @@ class SslCommerzBillingProvider implements BillingProvider {
       currency: 'BDT',
       status: 'pending',
       purpose: 'subscription',
-      raw: { initiatedBy: user.email, period },
+      raw: {
+        initiatedBy: user.email,
+        period,
+        customerInfo: {
+          phone: customerInfo?.phone,
+          address: customerInfo?.address,
+          city: customerInfo?.city,
+        },
+      },
     });
 
-    // Attempt live sandbox call when in production sandbox mode; fall back to local sandbox simulator redirect in development
+    const isSandbox = env.SSLCZ_SANDBOX;
+    const gatewayApiUrl = isSandbox
+      ? 'https://sandbox.sslcommerz.com/gwprocess/v4/api.php'
+      : 'https://securepay.sslcommerz.com/gwprocess/v4/api.php';
+
+    const cusName = user.name || tenant.name || 'DokanOS Merchant';
+    const cusEmail = user.email || 'billing@dokanos.app';
+    const cusPhone = customerInfo?.phone?.trim() || '01711111111';
+    const cusAdd1 = customerInfo?.address?.trim() || 'Dhaka, Bangladesh';
+    const cusCity = customerInfo?.city?.trim() || 'Dhaka';
+
     let gatewayUrl = `/app/billing?sandbox_checkout=sslcommerz&tran_id=${encodeURIComponent(tranId)}&amount=${amount}&period=${period}`;
 
-    if (env.NODE_ENV === 'production' && env.SSLCZ_SANDBOX) {
-      try {
-        const formData = new URLSearchParams({
-          store_id: env.SSLCZ_STORE_ID,
-          store_passwd: env.SSLCZ_STORE_PASSWD,
-          total_amount: String(amount),
-          currency: 'BDT',
-          tran_id: tranId,
-          success_url: env.SSLCZ_SUCCESS_URL,
-          fail_url: env.SSLCZ_FAIL_URL,
-          cancel_url: env.SSLCZ_CANCEL_URL,
-          ipn_url: env.SSLCZ_IPN_URL,
-          cus_name: user.name,
-          cus_email: user.email,
-          cus_add1: 'Mirpur-10, Dhaka',
-          cus_city: 'Dhaka',
-          cus_country: 'Bangladesh',
-          cus_phone: '01700000000',
-          shipping_method: 'NO',
-          product_name: productName,
-          product_category: 'Subscription',
-          product_profile: 'non-physical-goods',
-        });
+    const formData = new URLSearchParams({
+      store_id: env.SSLCZ_STORE_ID,
+      store_passwd: env.SSLCZ_STORE_PASSWD,
+      total_amount: String(amount),
+      currency: 'BDT',
+      tran_id: tranId,
+      success_url: env.SSLCZ_SUCCESS_URL,
+      fail_url: env.SSLCZ_FAIL_URL,
+      cancel_url: env.SSLCZ_CANCEL_URL,
+      ipn_url: env.SSLCZ_IPN_URL,
+      cus_name: cusName,
+      cus_email: cusEmail,
+      cus_add1: cusAdd1,
+      cus_city: cusCity,
+      cus_country: 'Bangladesh',
+      cus_phone: cusPhone,
+      shipping_method: 'NO',
+      product_name: productName,
+      product_category: 'Subscription',
+      product_profile: 'general',
+    });
 
-        const resp = await axios.post<{ status?: string; GatewayPageURL?: string }>(
-          'https://sandbox.sslcommerz.com/gwprocess/v4/api.php',
-          formData.toString(),
-          {
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            timeout: 8000,
-          },
+    try {
+      const resp = await axios.post<{
+        status?: string;
+        failedreason?: string;
+        GatewayPageURL?: string;
+      }>(gatewayApiUrl, formData.toString(), {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        timeout: 10000,
+      });
+
+      if (resp.data?.status === 'SUCCESS' && resp.data.GatewayPageURL) {
+        gatewayUrl = resp.data.GatewayPageURL;
+      } else if (env.NODE_ENV === 'production') {
+        throw AppError.badRequest(
+          `SSLCommerz session initialization failed: ${resp.data?.failedreason || resp.data?.status || 'Unknown gateway error'}`,
         );
-        if (resp.data?.GatewayPageURL) {
-          gatewayUrl = resp.data.GatewayPageURL;
-        }
-      } catch {
-        // Fallback to built-in SSLCommerz Sandbox test card modal
       }
+    } catch (err) {
+      if (err instanceof AppError) throw err;
+      if (env.NODE_ENV === 'production') {
+        throw AppError.badRequest(
+          `Failed to connect to SSLCommerz gateway: ${err instanceof Error ? err.message : 'Network error'}`,
+        );
+      }
+      // Non-production fallback to local simulator URL
     }
 
     return {
       provider: 'sslcommerz',
       gatewayUrl,
       tranId,
-      mode: 'sandbox',
+      mode: isSandbox ? 'sandbox' : 'live',
     };
   }
 
@@ -381,13 +484,57 @@ class StripeTestBillingProvider implements BillingProvider {
       raw: { initiatedBy: user.email, testMode: true, period },
     });
 
-    const gatewayUrl = `/app/billing?sandbox_checkout=stripe&tran_id=${encodeURIComponent(tranId)}&amount=${amount}&period=${period}`;
+    let gatewayUrl = `/app/billing?sandbox_checkout=stripe&tran_id=${encodeURIComponent(tranId)}&amount=${amount}&period=${period}`;
+
+    if (env.STRIPE_SECRET_KEY && env.STRIPE_SECRET_KEY !== 'sk_test_placeholder') {
+      try {
+        const stripe = new Stripe(env.STRIPE_SECRET_KEY);
+        const session = await stripe.checkout.sessions.create({
+          payment_method_types: ['card'],
+          mode: 'payment',
+          client_reference_id: tranId,
+          customer_email: user.email,
+          line_items: [
+            {
+              price_data: {
+                currency: 'bdt',
+                unit_amount: amount * 100, // smallest currency unit (poisha)
+                product_data: {
+                  name: `DokanOS Pro (${BILLING_PERIOD_DAYS[period]} days)`,
+                  description: `DokanOS Pro subscription for ${tenant.name}`,
+                },
+              },
+              quantity: 1,
+            },
+          ],
+          metadata: {
+            tranId,
+            tenantId: tenant.id,
+            period,
+          },
+          success_url: `${frontendBaseUrl()}/app/billing?status=success&tran_id=${encodeURIComponent(tranId)}`,
+          cancel_url: `${frontendBaseUrl()}/app/billing?status=cancelled&tran_id=${encodeURIComponent(tranId)}`,
+        });
+
+        if (session.url) {
+          gatewayUrl = session.url;
+        }
+      } catch (err) {
+        if (env.NODE_ENV === 'production') {
+          throw AppError.badRequest(
+            `Stripe checkout creation failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+          );
+        }
+      }
+    } else if (env.NODE_ENV === 'production') {
+      throw AppError.badRequest('Stripe secret key is not configured');
+    }
 
     return {
       provider: 'stripe',
       gatewayUrl,
       tranId,
-      mode: 'test',
+      mode: env.STRIPE_SECRET_KEY?.startsWith('sk_live_') ? 'live' : 'test',
     };
   }
 
@@ -446,6 +593,7 @@ class StripeTestBillingProvider implements BillingProvider {
 
     const session = await mongoose.startSession();
     let wasUpdated = false;
+    const receiptRef: { current: PaymentReceiptInfo | null } = { current: null };
 
     try {
       await session.withTransaction(async () => {
@@ -504,9 +652,36 @@ class StripeTestBillingProvider implements BillingProvider {
           },
           { upsert: true, session },
         );
+
+        const owner = await UserModel.findOne({ tenantId: paymentUpdate.tenantId, role: 'owner' })
+          .session(session)
+          .lean();
+        receiptRef.current = {
+          shopName: tenant.name,
+          amount: paymentUpdate.amount,
+          currency: paymentUpdate.currency,
+          period,
+          tranId,
+          expiresAt: newExpiresAt,
+          recipientEmail: owner?.email,
+        };
       });
     } finally {
       await session.endSession();
+    }
+
+    const receipt = receiptRef.current;
+    if (wasUpdated && receipt?.recipientEmail) {
+      void sendPaymentReceiptEmail({
+        to: receipt.recipientEmail,
+        shopName: receipt.shopName,
+        amount: receipt.amount,
+        currency: receipt.currency,
+        period: receipt.period,
+        tranId: receipt.tranId,
+        provider: 'stripe',
+        expiresAt: receipt.expiresAt,
+      });
     }
 
     return { processed: true, duplicate: !wasUpdated, tranId };
@@ -784,6 +959,53 @@ function parseBillingPeriod(body: unknown): BillingPeriod {
   throw AppError.badRequest("Invalid billing period. Expected 'monthly' or 'annual'.");
 }
 
+/**
+ * Reconciliation job: polls pending payments older than 30 minutes, marks them failed,
+ * and updates expired active subscriptions to past_due.
+ */
+export async function reconcilePendingPayments(): Promise<{
+  checked: number;
+  expired: number;
+  syncedSubscriptions: number;
+}> {
+  const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
+  const pendingPayments = await PaymentModel.find({
+    status: 'pending',
+    createdAt: { $lt: thirtyMinutesAgo },
+  }).limit(50);
+
+  let expired = 0;
+  for (const payment of pendingPayments) {
+    await PaymentModel.updateOne(
+      { _id: payment._id, status: 'pending' },
+      {
+        $set: {
+          status: 'failed',
+          raw: {
+            ...((payment.raw as Record<string, unknown>) || {}),
+            reconciliation: 'expired_after_30m_timeout',
+          },
+        },
+      },
+    );
+    expired += 1;
+  }
+
+  const expiredSubscriptions = await SubscriptionModel.find({
+    status: 'active',
+    currentPeriodEnd: { $lt: new Date() },
+  }).limit(50);
+
+  let syncedSubscriptions = 0;
+  for (const sub of expiredSubscriptions) {
+    sub.status = 'past_due';
+    await sub.save();
+    syncedSubscriptions += 1;
+  }
+
+  return { checked: pendingPayments.length, expired, syncedSubscriptions };
+}
+
 // POST /api/v1/billing/sslcommerz/init
 billingRouter.post(
   '/sslcommerz/init',
@@ -791,11 +1013,17 @@ billingRouter.post(
   async (req, res, next) => {
     try {
       const period = parseBillingPeriod(req.body);
+      const { phone, address, city } = (req.body ?? {}) as {
+        phone?: string;
+        address?: string;
+        city?: string;
+      };
       const checkout = await sslCommerzProvider.createCheckout(
         req.tenant!,
         { name: req.user!.name, email: req.user!.email },
         'pro',
         period,
+        { phone, address, city },
       );
       res.status(201).json({
         data: {
@@ -852,6 +1080,16 @@ billingRouter.post('/bkash/init', requirePermission('billing:write'), async (req
       parseBillingPeriod(req.body),
     );
     res.status(501).json({});
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/billing/reconcile
+billingRouter.post('/reconcile', requirePermission('billing:write'), async (_req, res, next) => {
+  try {
+    const result = await reconcilePendingPayments();
+    res.status(200).json({ data: result });
   } catch (err) {
     next(err);
   }

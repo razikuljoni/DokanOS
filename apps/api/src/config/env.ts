@@ -56,6 +56,12 @@ if (nodeEnv === 'production') {
   }
 }
 
+const defaultApiBase = process.env.RENDER_EXTERNAL_URL
+  ? `${process.env.RENDER_EXTERNAL_URL}/api/v1/billing`
+  : process.env.BACKEND_URL
+    ? `${process.env.BACKEND_URL}/api/v1/billing`
+    : 'http://localhost:4000/api/v1/billing';
+
 export const env: EnvConfig = {
   PORT: Number(process.env.PORT ?? 4000),
   NODE_ENV: nodeEnv,
@@ -69,14 +75,10 @@ export const env: EnvConfig = {
   SSLCZ_STORE_ID: process.env.SSLCZ_STORE_ID ?? 'testbox',
   SSLCZ_STORE_PASSWD: process.env.SSLCZ_STORE_PASSWD ?? 'qwerty',
   SSLCZ_SANDBOX: (process.env.SSLCZ_SANDBOX ?? 'true') === 'true',
-  SSLCZ_SUCCESS_URL:
-    process.env.SSLCZ_SUCCESS_URL ?? 'http://localhost:4000/api/v1/billing/sslcommerz/success',
-  SSLCZ_FAIL_URL:
-    process.env.SSLCZ_FAIL_URL ?? 'http://localhost:4000/api/v1/billing/sslcommerz/fail',
-  SSLCZ_CANCEL_URL:
-    process.env.SSLCZ_CANCEL_URL ?? 'http://localhost:4000/api/v1/billing/sslcommerz/cancel',
-  SSLCZ_IPN_URL:
-    process.env.SSLCZ_IPN_URL ?? 'http://localhost:4000/api/v1/billing/sslcommerz/ipn',
+  SSLCZ_SUCCESS_URL: process.env.SSLCZ_SUCCESS_URL ?? `${defaultApiBase}/sslcommerz/success`,
+  SSLCZ_FAIL_URL: process.env.SSLCZ_FAIL_URL ?? `${defaultApiBase}/sslcommerz/fail`,
+  SSLCZ_CANCEL_URL: process.env.SSLCZ_CANCEL_URL ?? `${defaultApiBase}/sslcommerz/cancel`,
+  SSLCZ_IPN_URL: process.env.SSLCZ_IPN_URL ?? `${defaultApiBase}/sslcommerz/ipn`,
   STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
   STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,
   SEED_DEMO: nodeEnv === 'production' ? false : (process.env.SEED_DEMO ?? 'true') === 'true',

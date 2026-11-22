@@ -23,14 +23,14 @@ export class NoOpSmsProvider implements SmsProvider {
 
 export const smsProvider: SmsProvider = new NoOpSmsProvider();
 
-// §8 Resend Email helper (Pro only for digests/reminders)
-export async function sendDigestEmail(params: {
+// §8 Resend Email helper (Pro only for digests/reminders/receipts)
+export async function sendResendEmail(params: {
   to: string;
   subject: string;
   html: string;
 }): Promise<boolean> {
   if (!env.RESEND_API_KEY || env.RESEND_API_KEY === 're_placeholder_key') {
-    logger.info('Resend API key not configured; email digest logged locally', {
+    logger.info('Resend API key not configured; email logged locally', {
       to: params.to,
       subject: params.subject,
     });
@@ -53,6 +53,8 @@ export async function sendDigestEmail(params: {
     return false;
   }
 }
+
+export const sendDigestEmail = sendResendEmail;
 
 export const notificationsRouter = Router();
 

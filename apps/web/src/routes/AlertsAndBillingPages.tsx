@@ -727,6 +727,21 @@ export function BillingPage(): React.ReactElement {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [billingPeriod, setBillingPeriod] = useState<BillingPeriod>('monthly');
+  const [activeTab, setActiveTab] = useState<'sslcommerz' | 'stripe'>('sslcommerz');
+
+  const [customerPhone, setCustomerPhone] = useState('01711111111');
+  const [customerAddress, setCustomerAddress] = useState('House 10, Road 2, Dhanmondi');
+  const [customerCity, setCustomerCity] = useState('Dhaka');
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+  const [addressError, setAddressError] = useState<string | null>(null);
+
+  const fillTestDetails = () => {
+    setCustomerPhone('01711111111');
+    setCustomerAddress('House 10, Road 2, Dhanmondi');
+    setCustomerCity('Dhaka');
+    setPhoneError(null);
+    setAddressError(null);
+  };
 
   const [sandboxModal, setSandboxModal] = useState<{
     provider: 'sslcommerz' | 'stripe';
@@ -760,12 +775,17 @@ export function BillingPage(): React.ReactElement {
   const callbackTranId = searchParams.get('tran_id');
 
   const initSslCommerzMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (payload: {
+      period: BillingPeriod;
+      phone?: string;
+      address?: string;
+      city?: string;
+    }) => {
       return apiFetch<{
         data: { GatewayPageURL: string; tranId: string; amount: number; period: BillingPeriod };
       }>('/api/v1/billing/sslcommerz/init', {
         method: 'POST',
-        body: JSON.stringify({ period: billingPeriod }),
+        body: JSON.stringify(payload),
       });
     },
     onSuccess: (res) => {
@@ -781,7 +801,39 @@ export function BillingPage(): React.ReactElement {
         period: res.data.period,
       });
     },
+    onError: (err) => {
+      addToast({
+        title: 'Checkout Initialization Failed',
+        description: err instanceof Error ? err.message : 'Could not initialize SSLCommerz gateway',
+        variant: 'danger',
+      });
+    },
   });
+
+  const validateAndSubmitSslCommerz = () => {
+    let valid = true;
+    const cleanPhone = customerPhone.trim().replace(/[- ]/g, '');
+    if (!cleanPhone || !/^(\+88)?01[3-9]\d{8}$/.test(cleanPhone)) {
+      setPhoneError('Please enter a valid 11-digit Bangladesh phone number (01XXXXXXXXX)');
+      valid = false;
+    } else {
+      setPhoneError(null);
+    }
+    if (!customerAddress.trim()) {
+      setAddressError('Customer street address is required by SSLCommerz');
+      valid = false;
+    } else {
+      setAddressError(null);
+    }
+    if (!valid) return;
+
+    initSslCommerzMutation.mutate({
+      period: billingPeriod,
+      phone: cleanPhone,
+      address: customerAddress.trim(),
+      city: customerCity.trim() || 'Dhaka',
+    });
+  };
 
   const initStripeTestMutation = useMutation({
     mutationFn: async () => {
@@ -803,6 +855,13 @@ export function BillingPage(): React.ReactElement {
         tranId: res.data.tranId,
         amount: res.data.amount,
         period: res.data.period,
+      });
+    },
+    onError: (err) => {
+      addToast({
+        title: 'Stripe Checkout Failed',
+        description: err instanceof Error ? err.message : 'Could not create Stripe checkout session',
+        variant: 'danger',
       });
     },
   });
@@ -855,14 +914,14 @@ export function BillingPage(): React.ReactElement {
       });
     },
     onSuccess: () => {
+      const days = sandboxModal ? BILLING_PERIOD_DAYS[sandboxModal.period] : 30;
       setSandboxModal(null);
       setSearchParams({});
-      updateTenant({ plan: 'pro' });
       void queryClient.invalidateQueries({ queryKey: ['billing', tenant?.id] });
       void queryClient.invalidateQueries({ queryKey: ['notifications', tenant?.id] });
       addToast({
-        title: 'Upgraded to DokanOS Pro!',
-        description: `Payment validated server-side and Pro limits unlocked for ${sandboxModal ? BILLING_PERIOD_DAYS[sandboxModal.period] : 30} days.`,
+        title: 'Payment Confirmed',
+        description: `Payment validated server-side. DokanOS Pro plan extended by ${days} days.`,
         variant: 'success',
       });
     },
@@ -1055,15 +1114,15 @@ export function BillingPage(): React.ReactElement {
             <CardHeader>
               <CardTitle>
                 {billing?.plan === 'pro'
-                  ? `Manage Pro Plan · Extend ${BILLING_PERIOD_DAYS[billingPeriod]} Days (৳${BILLING_PERIOD_PRICE_BDT[billingPeriod].toLocaleString()})`
-                  : `Upgrade to DokanOS Pro (${BILLING_PERIOD_DAYS[billingPeriod]} Days — ৳${BILLING_PERIOD_PRICE_BDT[billingPeriod].toLocaleString()})`}
+                  ? `Extend DokanOS Pro · ${billingPeriod === 'annual' ? 'Annual (365 days)' : 'Monthly (30 days)'} (৳${BILLING_PERIOD_PRICE_BDT[billingPeriod].toLocaleString()})`
+                  : `Upgrade to DokanOS Pro · ${billingPeriod === 'annual' ? 'Annual (365 days)' : 'Monthly (30 days)'} (৳${BILLING_PERIOD_PRICE_BDT[billingPeriod].toLocaleString()})`}
               </CardTitle>
               <CardDescription>
                 Local Bangladeshi gateways use one-off payments — no auto-renewal. Every callback
                 is verified server-side and deduplicated on <code>{'{ provider, eventId }'}</code>.
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-4">
               <div className="grid grid-cols-2 gap-2">
                 <Button
                   type="button"
@@ -1081,36 +1140,193 @@ export function BillingPage(): React.ReactElement {
                 </Button>
               </div>
 
-              <Button
-                className="w-full justify-between"
-                disabled={initSslCommerzMutation.isPending}
-                onClick={() => initSslCommerzMutation.mutate()}
-              >
-                <span className="flex items-center gap-2">
-                  <CreditCard className="h-4 w-4" />
-                  {billing?.plan === 'pro'
-                    ? `Extend +${BILLING_PERIOD_DAYS[billingPeriod]} Days via SSLCommerz (SANDBOX)`
-                    : `Upgrade ৳${BILLING_PERIOD_PRICE_BDT[billingPeriod].toLocaleString()} via SSLCommerz (SANDBOX)`}
-                </span>
-                <span className="font-mono text-xs">Test Visa 4111...</span>
-              </Button>
+              {/* Provider Selector Tabs */}
+              <div className="flex border-b border-border text-xs">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('sslcommerz')}
+                  className={`pb-2 px-3 font-semibold border-b-2 transition-colors cursor-pointer ${
+                    activeTab === 'sslcommerz'
+                      ? 'border-primary text-primary'
+                      : 'border-transparent text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  SSLCommerz (BDT · MFS & Cards)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('stripe')}
+                  className={`pb-2 px-3 font-semibold border-b-2 transition-colors cursor-pointer ${
+                    activeTab === 'stripe'
+                      ? 'border-primary text-primary'
+                      : 'border-transparent text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Stripe (International Cards)
+                </button>
+              </div>
 
-              <Button
-                variant="outline"
-                className="w-full justify-between"
-                disabled={initStripeTestMutation.isPending}
-                onClick={() => initStripeTestMutation.mutate()}
-              >
-                <span className="flex items-center gap-2">
-                  <CreditCard className="h-4 w-4" />
-                  {billing?.plan === 'pro'
-                    ? `Extend +${BILLING_PERIOD_DAYS[billingPeriod]} Days via Stripe (TEST MODE)`
-                    : `Upgrade ৳${BILLING_PERIOD_PRICE_BDT[billingPeriod].toLocaleString()} via Stripe Checkout (TEST MODE)`}
-                </span>
-                <span className="font-mono text-xs">Test Card 4242...</span>
-              </Button>
+              {activeTab === 'sslcommerz' && (
+                <div className="space-y-3 pt-1">
+                  {(import.meta.env.DEV ||
+                    import.meta.env.VITE_ENABLE_SANDBOX_SIMULATOR === 'true') && (
+                    <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 space-y-2 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-foreground flex items-center gap-1.5">
+                          <span className="h-2 w-2 rounded-full bg-amber-500" />
+                          SSLCommerz Sandbox Test Credentials
+                        </span>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          className="h-6 text-[11px] px-2"
+                          onClick={fillTestDetails}
+                        >
+                          Fill test details
+                        </Button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5 text-[11px] font-mono text-muted-foreground">
+                        <div>
+                          Store: <strong className="text-foreground">testbox (Sandbox)</strong>
+                        </div>
+                        <div>
+                          Card: <strong className="text-foreground">4111 1111 1111 1111</strong>
+                        </div>
+                        <div>
+                          Expiry: <strong className="text-foreground">12/26 (CVV 111)</strong>
+                        </div>
+                        <div>
+                          OTP: <strong className="text-foreground">123456</strong>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    <div className="space-y-1">
+                      <Label htmlFor="cus-phone" className="text-xs">
+                        Customer Phone <span className="text-destructive">*</span>
+                      </Label>
+                      <Input
+                        id="cus-phone"
+                        value={customerPhone}
+                        onChange={(e) => {
+                          setCustomerPhone(e.target.value);
+                          if (phoneError) setPhoneError(null);
+                        }}
+                        placeholder="017XXXXXXXX"
+                        className={`font-mono text-xs ${phoneError ? 'border-destructive' : ''}`}
+                      />
+                      {phoneError && <p className="text-[11px] text-destructive">{phoneError}</p>}
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label htmlFor="cus-city" className="text-xs">
+                        City
+                      </Label>
+                      <Input
+                        id="cus-city"
+                        value={customerCity}
+                        onChange={(e) => setCustomerCity(e.target.value)}
+                        placeholder="Dhaka"
+                        className="text-xs"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-2 space-y-1">
+                      <Label htmlFor="cus-address" className="text-xs">
+                        Street Address <span className="text-destructive">*</span>
+                      </Label>
+                      <Input
+                        id="cus-address"
+                        value={customerAddress}
+                        onChange={(e) => {
+                          setCustomerAddress(e.target.value);
+                          if (addressError) setAddressError(null);
+                        }}
+                        placeholder="House / Road / Area"
+                        className={`text-xs ${addressError ? 'border-destructive' : ''}`}
+                      />
+                      {addressError && (
+                        <p className="text-[11px] text-destructive">{addressError}</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <Button
+                    className="w-full justify-between"
+                    disabled={initSslCommerzMutation.isPending}
+                    onClick={validateAndSubmitSslCommerz}
+                  >
+                    <span className="flex items-center gap-2">
+                      <CreditCard className="h-4 w-4" />
+                      {initSslCommerzMutation.isPending
+                        ? 'Connecting Gateway...'
+                        : `Pay ৳${BILLING_PERIOD_PRICE_BDT[billingPeriod].toLocaleString()} via SSLCommerz`}
+                    </span>
+                    <span className="font-mono text-xs">Cards · bKash · Nagad</span>
+                  </Button>
+                </div>
+              )}
+
+              {activeTab === 'stripe' && (
+                <div className="space-y-3 pt-1">
+                  {(import.meta.env.DEV ||
+                    import.meta.env.VITE_ENABLE_SANDBOX_SIMULATOR === 'true') && (
+                    <div className="rounded-md border border-blue-500/30 bg-blue-500/10 p-3 space-y-2 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-foreground flex items-center gap-1.5">
+                          <span className="h-2 w-2 rounded-full bg-blue-500" />
+                          Stripe Test Mode Credentials
+                        </span>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          className="h-6 text-[11px] px-2"
+                          onClick={() => {
+                            setCardNumber('4242424242424242');
+                            setOtp('123456');
+                          }}
+                        >
+                          Fill test card
+                        </Button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5 text-[11px] font-mono text-muted-foreground">
+                        <div>
+                          Test Card: <strong className="text-foreground">4242 4242 4242 4242</strong>
+                        </div>
+                        <div>
+                          Expiry: <strong className="text-foreground">12/26 (CVC 111)</strong>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="text-xs text-muted-foreground">
+                    Redirects to Stripe hosted checkout. Card details are processed directly on
+                    Stripe PCI-DSS Level 1 servers.
+                  </p>
+
+                  <Button
+                    variant="outline"
+                    className="w-full justify-between"
+                    disabled={initStripeTestMutation.isPending}
+                    onClick={() => initStripeTestMutation.mutate()}
+                  >
+                    <span className="flex items-center gap-2">
+                      <CreditCard className="h-4 w-4" />
+                      {initStripeTestMutation.isPending
+                        ? 'Creating Checkout...'
+                        : `Pay ৳${BILLING_PERIOD_PRICE_BDT[billingPeriod].toLocaleString()} via Stripe Checkout`}
+                    </span>
+                    <span className="font-mono text-xs">Visa · Mastercard · Amex</span>
+                  </Button>
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-border">
                 <div className="text-xs text-muted-foreground flex items-center gap-1.5 py-1">
                   <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
                   <span>bKash Direct: Pending merchant onboarding</span>
@@ -1174,7 +1390,9 @@ export function BillingPage(): React.ReactElement {
             <div className="p-3 rounded-md bg-secondary/60 border border-border text-xs space-y-1">
               <div className="flex justify-between">
                 <span>Product:</span>
-                <strong>DokanOS Pro (30 Days)</strong>
+                <strong>
+                  DokanOS Pro ({sandboxModal.period === 'annual' ? 'Annual (365 days)' : 'Monthly (30 days)'})
+                </strong>
               </div>
               <div className="flex justify-between">
                 <span>Amount:</span>
@@ -1185,17 +1403,33 @@ export function BillingPage(): React.ReactElement {
             </div>
 
             <div className="space-y-3">
-              <div className="space-y-1">
+              <div className="flex items-center justify-between">
                 <Label htmlFor="test-card" className="text-xs">
                   Sandbox Test Card Number
                 </Label>
-                <Input
-                  id="test-card"
-                  value={cardNumber}
-                  onChange={(e) => setCardNumber(e.target.value)}
-                  className="font-mono"
-                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 text-[11px] px-1.5 text-primary"
+                  onClick={() => {
+                    if (sandboxModal.provider === 'sslcommerz') {
+                      setCardNumber('4111111111111111');
+                    } else {
+                      setCardNumber('4242424242424242');
+                    }
+                    setOtp('123456');
+                  }}
+                >
+                  Fill test details
+                </Button>
               </div>
+              <Input
+                id="test-card"
+                value={cardNumber}
+                onChange={(e) => setCardNumber(e.target.value)}
+                className="font-mono"
+              />
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <Label className="text-xs">Expiry / CVV</Label>
