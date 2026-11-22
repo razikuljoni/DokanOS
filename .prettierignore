@@ -3,3 +3,8 @@ dist
 coverage
 pnpm-lock.yaml
 *.min.js
+dev-dist
+.github/context-mode
+test-results
+playwright-report
+.claude
