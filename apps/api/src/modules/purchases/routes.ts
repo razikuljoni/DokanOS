@@ -19,6 +19,7 @@ import { requirePermission } from '../../middleware/rbac.js';
 import { AppError } from '../../utils/errors.js';
 import { buildPaginationMeta, parsePagination, toObjectIdParam } from '../../utils/pagination.js';
 import { invalidateTenantCache } from '../../config/redis.js';
+import { recordAuditLog } from '../../utils/audit.js';
 
 export const purchasesRouter = Router();
 
@@ -67,7 +68,7 @@ purchasesRouter.post('/', requirePermission('purchases:write'), async (req, res,
     const userObjectId = new Types.ObjectId(req.user!.id);
     const supplierObjectId = new Types.ObjectId(parsed.supplierId);
 
-    let createdPurchaseId: Types.ObjectId | null = null;
+    const purchaseId = new Types.ObjectId();
 
     await session.withTransaction(async () => {
       const supplier = await SupplierModel.findOne({
@@ -80,24 +81,38 @@ purchasesRouter.post('/', requirePermission('purchases:write'), async (req, res,
       }
 
       const purchaseItems: IPurchaseItem[] = [];
-      const purchaseId = new Types.ObjectId();
 
       for (const item of parsed.items) {
-        const product = await ProductModel.findOneAndUpdate(
-          {
-            _id: new Types.ObjectId(item.productId),
-            tenantId: tenantObjectId,
-          },
-          {
-            $inc: { stock: item.qty },
-            $set: { costPrice: item.costPrice },
-          },
-          { session, new: true },
-        );
+        const product = await ProductModel.findOne({
+          _id: new Types.ObjectId(item.productId),
+          tenantId: tenantObjectId,
+        }).session(session);
 
         if (!product) {
           throw AppError.notFound(`Product ${item.productId} not found`);
         }
+
+        const oldCostPrice = product.costPrice;
+        const isCostChanged = oldCostPrice !== item.costPrice;
+
+        product.stock += item.qty;
+        if (isCostChanged) {
+          product.costPrice = item.costPrice;
+          await recordAuditLog({
+            tenantId: req.tenant!.id,
+            userId: req.user!.id,
+            action: 'product.cost_changed',
+            entity: 'Product',
+            entityId: product._id.toString(),
+            changes: {
+              oldCostPrice,
+              newCostPrice: item.costPrice,
+              purchaseId: purchaseId.toString(),
+              supplier: supplier.name,
+            },
+          });
+        }
+        await product.save({ session });
 
         const lineTotal = Number((item.qty * item.costPrice).toFixed(2));
         purchaseItems.push({
@@ -119,7 +134,9 @@ purchasesRouter.post('/', requirePermission('purchases:write'), async (req, res,
               refId: purchaseId,
               refType: 'Purchase',
               userId: userObjectId,
-              note: `Purchase from ${supplier.name}`,
+              note: isCostChanged
+                ? `Purchase from ${supplier.name} (Cost price updated from ৳${oldCostPrice} to ৳${item.costPrice})`
+                : `Purchase from ${supplier.name}`,
             },
           ],
           { session },
@@ -159,13 +176,23 @@ purchasesRouter.post('/', requirePermission('purchases:write'), async (req, res,
         supplier.totalDue = Number((supplier.totalDue + dueAmount).toFixed(2));
         await supplier.save({ session });
       }
-
-      createdPurchaseId = purchaseId;
     });
 
     await invalidateTenantCache(req.tenant!.id);
 
-    const purchase = await PurchaseModel.findById(createdPurchaseId)
+    await recordAuditLog({
+      tenantId: req.tenant!.id,
+      userId: req.user!.id,
+      action: 'purchase.created',
+      entity: 'Purchase',
+      entityId: purchaseId.toString(),
+      changes: {
+        supplierId: supplierObjectId.toString(),
+        itemCount: parsed.items.length,
+      },
+    });
+
+    const purchase = await PurchaseModel.findById(purchaseId)
       .populate('supplierId', 'name phone')
       .lean();
 
@@ -253,6 +280,18 @@ purchasesRouter.patch('/:id/pay', requirePermission('purchases:write'), async (r
     });
 
     await invalidateTenantCache(req.tenant!.id);
+
+    await recordAuditLog({
+      tenantId: req.tenant!.id,
+      userId: req.user!.id,
+      action: 'purchase.paid',
+      entity: 'Purchase',
+      entityId: purchaseObjectId.toString(),
+      changes: {
+        amount: parsed.amount,
+        method: parsed.method,
+      },
+    });
 
     const updated = await PurchaseModel.findById(purchaseObjectId)
       .populate('supplierId', 'name phone')

@@ -7,8 +7,8 @@ This guide walks through deploying **DokanOS** end-to-end on **100% free tiers**
 ## Pre-Flight Release Checklist (Phase 6 Verification)
 
 - [x] **Lockfile & Package Manager:** Single `pnpm-lock.yaml` at repo root (`packageManager: "pnpm@10.34.5"`), no `bun.lock` or `package-lock.json`; `pnpm install --frozen-lockfile` succeeds.
-- [x] **Static Checks & Tests:** `pnpm lint`, `pnpm typecheck`, `pnpm --filter api test` (13/13 passing tests across 2 suites), and `pnpm build` all pass with zero errors.
-- [x] **Multi-Tenant Isolation:** Every Mongoose query and IndexedDB cache key is scoped by `tenantId`; spoofed `X-Tenant-Id` headers return `403 TENANT_MISMATCH`.
+- [x] **Static Checks & Tests:** `pnpm lint`, `pnpm typecheck`, `pnpm --filter api test` (41+ passing tests), and `pnpm build` all pass with zero errors.
+- [x] **Multi-Tenant Isolation:** All authenticated business queries (sales, products, dues, purchases, customers, suppliers) and IndexedDB cache keys are strictly scoped by `tenantId`; spoofed `X-Tenant-Id` headers return `403 TENANT_MISMATCH`. (Public payment webhooks look up by transaction ID `tranId` then resolve tenant context safely).
 - [x] **Auth Security:** `15m` JWT access tokens live in memory only (never `localStorage`/`sessionStorage`); `30d` refresh tokens are stored as `SHA-256` hashes in MongoDB and rotated via `httpOnly` cookie `dokanos_rt` with family reuse detection.
 - [x] **Atomic Stock & Money Transactions:** POS sales, sale returns, purchase orders, and Baki due payments run inside MongoDB replica-set transactions with `$gte` stock guards.
 - [x] **SSLCommerz Sandbox & Stripe Test Mode:** `/api/v1/billing/sslcommerz/success`, `/fail`, and `/cancel` accept both `GET` (browser redirect) and `POST` without requiring an `Authorization` header, validate and apply the 30-day Pro upgrade idempotently, and redirect to `${FRONTEND_URL}/app/billing`.
@@ -39,7 +39,7 @@ This guide walks through deploying **DokanOS** end-to-end on **100% free tiers**
 
 ## Step 3: Provision Resend (Free Sandbox) & SSLCommerz Sandbox
 
-1. **Resend Free Tier:** Create a free account at [https://resend.com](https://resend.com) and copy your API key (`re_...`) into `RESEND_API_KEY`. If omitted or set to `re_placeholder_key`, email digests log cleanly to `stdout` via Pino without failing jobs.
+1. **Resend Free Tier:** Create a free account at [https://resend.com](https://resend.com) and copy your API key (`re_...`) into `RESEND_API_KEY`. If omitted or set to `re_placeholder_key`, email digests log cleanly to `stdout` via structured logger without failing jobs.
 2. **SSLCommerz Sandbox (Free Developer Account):**
    - Register a free sandbox store at [https://developer.sslcommerz.com/registration/](https://developer.sslcommerz.com/registration/) **or** use the built-in public sandbox credentials (`SSLCZ_STORE_ID=testbox`, `SSLCZ_STORE_PASSWD=qwerty`, `SSLCZ_SANDBOX=true`).
    - Set the four callback URLs to your Render API base URL:
@@ -91,6 +91,25 @@ This guide walks through deploying **DokanOS** end-to-end on **100% free tiers**
 4. Deploy. Set `FRONTEND_URL=https://dokanos.onrender.com` in Render for the unified same-origin deployment.
 
 > **Clean Release Tree Note:** If deploying from an AI Studio export, run `bash scripts/prepare-release-tree.sh` on your release branch before pushing so AI Studio's preview harness files (`root server.ts`, `root index.html`, `root vite.config.ts`, `root metadata.json`) are excluded.
+
+---
+
+## Step 6: Database Backups & Disaster Recovery (Atlas M0)
+
+MongoDB Atlas M0 Free Tier does not include automated Cloud Backups. To prevent catastrophic data loss, use the automated backup utility script `scripts/backup-restore.sh`:
+
+1. **Perform an on-demand snapshot:**
+   ```bash
+   MONGODB_URI="mongodb+srv://..." bash scripts/backup-restore.sh backup ./backups
+   ```
+2. **Verify archive integrity:**
+   ```bash
+   bash scripts/backup-restore.sh verify ./backups/dokanos_backup_<timestamp>.gz
+   ```
+3. **Disaster Recovery Restore:**
+   ```bash
+   MONGODB_URI="mongodb+srv://..." bash scripts/backup-restore.sh restore ./backups/dokanos_backup_<timestamp>.gz
+   ```
 
 ---
 

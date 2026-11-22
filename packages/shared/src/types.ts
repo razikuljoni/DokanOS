@@ -17,6 +17,12 @@ import {
   updateTenantSettingsSchema,
   updateUserRoleSchema,
   updateUserStatusSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
+  changePasswordSchema,
+  acceptInviteSchema,
+  createCustomerSchema,
+  updateCustomerSchema,
 } from './schemas.js';
 import type { ErrorCode } from './constants.js';
 
@@ -37,6 +43,12 @@ export type InviteStaffInput = z.infer<typeof inviteStaffSchema>;
 export type UpdateUserRoleInput = z.infer<typeof updateUserRoleSchema>;
 export type UpdateUserStatusInput = z.infer<typeof updateUserStatusSchema>;
 export type BillingCheckoutInitInput = z.infer<typeof billingCheckoutInitSchema>;
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+export type AcceptInviteInput = z.infer<typeof acceptInviteSchema>;
+export type CreateCustomerInput = z.infer<typeof createCustomerSchema>;
+export type UpdateCustomerInput = z.infer<typeof updateCustomerSchema>;
 
 export interface ApiErrorResponse {
   error: {
@@ -59,5 +71,10 @@ export interface PaginatedResponse<T> {
 }
 
 export interface HealthResponse {
-  ok: true;
+  ok: boolean;
+  services?: {
+    database: 'connected' | 'disconnected';
+    redis?: 'connected' | 'degraded' | 'disabled';
+  };
+  error?: string;
 }

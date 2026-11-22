@@ -456,6 +456,12 @@ export function SettingsPage(): React.ReactElement {
   const [lastSetupLink, setLastSetupLink] = useState<string | null>(null);
   const [showAllPermissions, setShowAllPermissions] = useState(false);
 
+  // Change Password state
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+
   // 1. Live Tenant Profile: GET /api/v1/tenants/me
   const {
     data: tenantRes,
@@ -562,6 +568,36 @@ export function SettingsPage(): React.ReactElement {
       description: 'Reverted shop profile fields to the latest saved server state.',
     });
   };
+
+  const changePasswordMutation = useMutation({
+    mutationFn: async () => {
+      if (newPassword.length < 8) {
+        throw new Error('New password must be at least 8 characters');
+      }
+      if (newPassword !== confirmPassword) {
+        throw new Error('New passwords do not match');
+      }
+      return apiFetch<{ message: string }>('/api/v1/auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+    },
+    onSuccess: (res) => {
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setPasswordError(null);
+      addToast({
+        title: 'Password Updated',
+        description: res.message || 'Please log in again with your new password.',
+        variant: 'success',
+      });
+      useAuthStore.getState().clearAuth();
+    },
+    onError: (err) => {
+      setPasswordError(err instanceof Error ? err.message : 'Failed to change password');
+    },
+  });
 
   // PATCH /api/v1/tenants/me
   const saveSettingsMutation = useMutation({
@@ -978,81 +1014,15 @@ export function SettingsPage(): React.ReactElement {
                     max={10000}
                     disabled={!canWriteTenant}
                     value={threshold}
-                    onChange={(e) => setThreshold(Number(e.target.value))}
+                    onChange={(e) => {
+                      const val = e.target.value === '' ? 0 : Math.max(0, parseInt(e.target.value, 10) || 0);
+                      setThreshold(val);
+                    }}
                     className="bg-card border-input text-foreground font-mono text-xs tabular-nums"
                   />
                 </div>
 
-                {/* Row 2 Col 1: Physical Location & Holding (UNCONNECTED in backend schema) */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <Label
-                      htmlFor="set-location-unconnected"
-                      className="text-[10px] font-mono uppercase tracking-wider font-semibold text-muted-foreground"
-                    >
-                      PHYSICAL LOCATION &amp; HOLDING
-                    </Label>
-                    <span className="rounded border border-warning/30 bg-warning/15 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-warning">
-                      Unconnected
-                    </span>
-                  </div>
-                  <Input
-                    id="set-location-unconnected"
-                    value=""
-                    placeholder="Unconnected — address field not in Tenant schema"
-                    disabled
-                    readOnly
-                    className="bg-secondary/50 border-border text-xs text-muted-foreground"
-                  />
-                </div>
-
-                {/* Row 2 Col 2: Official Helpline / SMS Gateway (UNCONNECTED in backend schema) */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <Label
-                      htmlFor="set-helpline-unconnected"
-                      className="text-[10px] font-mono uppercase tracking-wider font-semibold text-muted-foreground"
-                    >
-                      OFFICIAL HELPLINE / SMS GATEWAY
-                    </Label>
-                    <span className="rounded border border-warning/30 bg-warning/15 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-warning">
-                      NoOp SMS Stub
-                    </span>
-                  </div>
-                  <Input
-                    id="set-helpline-unconnected"
-                    value=""
-                    placeholder="Unconnected — phone/OTP field not in Tenant schema"
-                    disabled
-                    readOnly
-                    className="bg-secondary/50 border-border text-xs text-muted-foreground"
-                  />
-                </div>
-
-                {/* Row 2 Col 3: Trade License & DGDA Reg (UNCONNECTED in backend schema) */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <Label
-                      htmlFor="set-dgda-unconnected"
-                      className="text-[10px] font-mono uppercase tracking-wider font-semibold text-muted-foreground"
-                    >
-                      TRADE LICENSE &amp; DGDA REG
-                    </Label>
-                    <span className="rounded border border-warning/30 bg-warning/15 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-warning">
-                      Unconnected
-                    </span>
-                  </div>
-                  <Input
-                    id="set-dgda-unconnected"
-                    value=""
-                    placeholder="Unconnected — tradeLicense not in Tenant schema"
-                    disabled
-                    readOnly
-                    className="bg-secondary/50 border-border text-xs text-muted-foreground"
-                  />
-                </div>
-
-                {/* Row 3 Col 1: Base Ledger Currency (LIVE: settings.currency) */}
+                {/* Row 2 Col 1: Base Ledger Currency (LIVE: settings.currency) */}
                 <div className="space-y-1.5">
                   <Label
                     htmlFor="set-currency"
@@ -1069,7 +1039,7 @@ export function SettingsPage(): React.ReactElement {
                   />
                 </div>
 
-                {/* Row 3 Col 2: Fiscal Clock & Timezone (LIVE constant: Asia/Dhaka) */}
+                {/* Row 2 Col 2: Fiscal Clock & Timezone (LIVE constant: Asia/Dhaka) */}
                 <div className="space-y-1.5">
                   <Label
                     htmlFor="set-timezone"
@@ -1086,7 +1056,7 @@ export function SettingsPage(): React.ReactElement {
                   />
                 </div>
 
-                {/* Row 3 Col 3: Billing & Audit Email (LIVE authenticated user email + unconnected shift window note) */}
+                {/* Row 2 Col 3: Billing & Audit Email */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <Label
@@ -1472,9 +1442,9 @@ export function SettingsPage(): React.ReactElement {
             )}
 
             <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Generates a one-time invite token and default password (<code>Staff1234!</code>)
-              enforced by plan staff limits ({usage?.staffCount ?? 0} / {usage?.maxStaff ?? 1}{' '}
-              used).
+              Generates a one-time activation link expiring in 7 days where the staff member chooses
+              their own password. Enforced by plan staff limits ({usage?.staffCount ?? (usersRes?.data.length ?? 1)}{' '}
+              / {usage?.maxStaff ?? 1} allocated).
             </p>
           </CardContent>
         </Card>
@@ -1714,6 +1684,82 @@ export function SettingsPage(): React.ReactElement {
                 ))}
               </div>
             )}
+          </CardContent>
+        </Card>
+
+        {/* Change Account Password Card */}
+        <Card
+          aria-labelledby="change-password-heading"
+          className="lg:col-span-12 rounded-xl border border-border bg-card text-card-foreground"
+        >
+          <CardHeader className="border-b border-border pb-3 space-y-0.5">
+            <CardTitle
+              id="change-password-heading"
+              className="flex items-center gap-2 text-base font-bold text-foreground"
+            >
+              <Lock className="h-4 w-4 text-primary" />
+              <span>Security &amp; Password</span>
+            </CardTitle>
+            <CardDescription className="text-xs text-muted-foreground">
+              Update your account password. Changing password automatically revokes all other active sessions (<code>POST /api/v1/auth/change-password</code>).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-4">
+            {passwordError && (
+              <div className="p-3 rounded-md bg-destructive/10 border border-destructive text-xs text-destructive mb-4">
+                {passwordError}
+              </div>
+            )}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                changePasswordMutation.mutate();
+              }}
+              className="grid grid-cols-1 md:grid-cols-3 gap-4"
+            >
+              <div className="space-y-1.5">
+                <Label htmlFor="curr-pass">Current Password</Label>
+                <Input
+                  id="curr-pass"
+                  type="password"
+                  placeholder="••••••••"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="new-pass">New Password (min 8 chars)</Label>
+                <Input
+                  id="new-pass"
+                  type="password"
+                  placeholder="••••••••"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="confirm-pass">Confirm New Password</Label>
+                <Input
+                  id="confirm-pass"
+                  type="password"
+                  placeholder="••••••••"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="md:col-span-3 flex justify-end">
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={changePasswordMutation.isPending}
+                >
+                  {changePasswordMutation.isPending ? 'Updating...' : 'Update Password'}
+                </Button>
+              </div>
+            </form>
           </CardContent>
         </Card>
       </div>

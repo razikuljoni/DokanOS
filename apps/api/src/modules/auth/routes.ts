@@ -5,12 +5,17 @@ import bcrypt from 'bcryptjs';
 import {
   ERROR_CODES,
   TRIAL_DAYS,
+  acceptInviteSchema,
+  changePasswordSchema,
+  forgotPasswordSchema,
   loginSchema,
   registerSchema,
+  resetPasswordSchema,
 } from '@dokanos/shared';
 import { RefreshTokenModel, TenantModel, UserModel } from '../../models/index.js';
 import { requireAuth, signAccessToken } from '../../middleware/auth.js';
 import { getEffectivePlan } from '../../middleware/tenant.js';
+import { sendResendEmail } from '../notifications/routes.js';
 import { AppError } from '../../utils/errors.js';
 import { env } from '../../config/env.js';
 
@@ -177,9 +182,10 @@ authRouter.post('/login', async (req, res, next) => {
 
     if (parsed.tenantSlug) {
       const t = await TenantModel.findOne({ slug: parsed.tenantSlug }).lean();
-      if (t) {
-        filter.tenantId = t._id;
+      if (!t) {
+        throw AppError.notFound('Shop not found');
       }
+      filter.tenantId = t._id;
     }
 
     const user = await UserModel.findOne(filter);
@@ -252,9 +258,7 @@ authRouter.post('/login', async (req, res, next) => {
 // POST /api/v1/auth/refresh — rotates refresh token; reuse revokes entire family
 authRouter.post('/refresh', async (req, res, next) => {
   try {
-    const rawToken =
-      (req.cookies as Record<string, string | undefined>)?.[REFRESH_COOKIE_NAME] ??
-      (req.body as { refreshToken?: string } | undefined)?.refreshToken;
+    const rawToken = (req.cookies as Record<string, string | undefined>)?.[REFRESH_COOKIE_NAME];
 
     if (!rawToken) {
       throw AppError.unauthorized('Refresh token missing');
@@ -348,9 +352,7 @@ authRouter.post('/refresh', async (req, res, next) => {
 // POST /api/v1/auth/logout
 authRouter.post('/logout', async (req, res, next) => {
   try {
-    const rawToken =
-      (req.cookies as Record<string, string | undefined>)?.[REFRESH_COOKIE_NAME] ??
-      (req.body as { refreshToken?: string } | undefined)?.refreshToken;
+    const rawToken = (req.cookies as Record<string, string | undefined>)?.[REFRESH_COOKIE_NAME];
 
     if (rawToken) {
       const tokenHash = hashRefreshToken(rawToken);
@@ -439,6 +441,193 @@ authRouter.delete('/sessions/:familyId', requireAuth, async (req, res, next) => 
       { $set: { revokedAt: new Date() } },
     );
     res.status(200).json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/auth/accept-invite
+authRouter.post('/accept-invite', async (req, res, next) => {
+  try {
+    const parsed = acceptInviteSchema.parse(req.body);
+    const tokenHash = crypto.createHash('sha256').update(parsed.inviteToken).digest('hex');
+
+    const user = await UserModel.findOne({
+      $or: [{ inviteTokenHash: tokenHash }, { inviteToken: parsed.inviteToken }],
+    });
+
+    if (!user || user.status === 'disabled') {
+      throw AppError.badRequest('Invalid or expired invitation token');
+    }
+
+    if (user.inviteExpiresAt && user.inviteExpiresAt.getTime() < Date.now()) {
+      throw AppError.badRequest(
+        'Invitation token has expired. Please ask the shop owner for a new invitation.',
+      );
+    }
+
+    const passwordHash = await bcrypt.hash(parsed.password, 12);
+    user.passwordHash = passwordHash;
+    user.status = 'active';
+    user.inviteToken = null;
+    user.inviteTokenHash = null;
+    user.inviteExpiresAt = null;
+    user.lastLoginAt = new Date();
+    await user.save();
+
+    const rawRefresh = generateOpaqueToken();
+    const familyId = crypto.randomUUID();
+    await RefreshTokenModel.create({
+      userId: user._id,
+      tokenHash: hashRefreshToken(rawRefresh),
+      familyId,
+      expiresAt: new Date(Date.now() + REFRESH_EXPIRY_MS),
+      userAgent: req.headers['user-agent'] ?? 'Browser',
+      ip: req.ip ?? '127.0.0.1',
+    });
+
+    const tenant = user.tenantId ? await TenantModel.findById(user.tenantId).lean() : null;
+    const accessToken = signAccessToken({
+      sub: user._id.toString(),
+      role: user.role,
+      tenantId: user.tenantId ? user.tenantId.toString() : null,
+      email: user.email,
+      name: user.name,
+    });
+
+    setRefreshCookie(res, rawRefresh);
+    res.status(200).json({
+      accessToken,
+      user: {
+        id: user._id.toString(),
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        tenantId: user.tenantId ? user.tenantId.toString() : null,
+      },
+      tenant: tenant
+        ? {
+            id: tenant._id.toString(),
+            name: tenant.name,
+            slug: tenant.slug,
+            type: tenant.type,
+            plan: getEffectivePlan(tenant),
+            planExpiresAt: tenant.planExpiresAt,
+            settings: tenant.settings,
+          }
+        : null,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/auth/forgot-password
+authRouter.post('/forgot-password', async (req, res, next) => {
+  try {
+    const parsed = forgotPasswordSchema.parse(req.body);
+    const user = await UserModel.findOne({
+      email: parsed.email,
+      status: { $ne: 'disabled' },
+    });
+
+    if (user) {
+      const rawResetToken = crypto.randomBytes(32).toString('hex');
+      const resetTokenHash = crypto.createHash('sha256').update(rawResetToken).digest('hex');
+      user.resetPasswordTokenHash = resetTokenHash;
+      user.resetPasswordExpiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+      await user.save();
+
+      const resetLink = `${env.FRONTEND_URL}/reset-password?token=${rawResetToken}&email=${encodeURIComponent(user.email)}`;
+
+      await sendResendEmail({
+        to: user.email,
+        subject: 'Reset your DokanOS password',
+        html: `
+          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #1c1917;">Password Reset Request</h2>
+            <p>Hello ${user.name},</p>
+            <p>We received a request to reset your password for your DokanOS account.</p>
+            <p>Click the link below to set a new password. This link is valid for 1 hour:</p>
+            <p style="margin: 24px 0;">
+              <a href="${resetLink}" style="background-color: #0f172a; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+                Reset Password
+              </a>
+            </p>
+            <p style="color: #64748b; font-size: 14px;">If you did not request this, you can safely ignore this email.</p>
+          </div>
+        `,
+      });
+    }
+
+    res.status(200).json({
+      message: 'If an account exists with this email, a password reset link has been sent.',
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/auth/reset-password
+authRouter.post('/reset-password', async (req, res, next) => {
+  try {
+    const parsed = resetPasswordSchema.parse(req.body);
+    const tokenHash = crypto.createHash('sha256').update(parsed.token).digest('hex');
+
+    const user = await UserModel.findOne({
+      resetPasswordTokenHash: tokenHash,
+      resetPasswordExpiresAt: { $gt: new Date() },
+    });
+
+    if (!user || user.status === 'disabled') {
+      throw AppError.badRequest('Invalid or expired password reset link');
+    }
+
+    user.passwordHash = await bcrypt.hash(parsed.newPassword, 12);
+    user.resetPasswordTokenHash = null;
+    user.resetPasswordExpiresAt = null;
+    await user.save();
+
+    await RefreshTokenModel.updateMany(
+      { userId: user._id, revokedAt: null },
+      { $set: { revokedAt: new Date() } },
+    );
+
+    clearRefreshCookie(res);
+    res.status(200).json({
+      message: 'Password has been reset successfully. Please sign in with your new password.',
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/auth/change-password
+authRouter.post('/change-password', requireAuth, async (req, res, next) => {
+  try {
+    const parsed = changePasswordSchema.parse(req.body);
+    const user = await UserModel.findById(req.user!.id);
+    if (!user) {
+      throw AppError.unauthorized('User not found');
+    }
+
+    const valid = await bcrypt.compare(parsed.currentPassword, user.passwordHash);
+    if (!valid) {
+      throw AppError.unauthorized('Current password is incorrect');
+    }
+
+    user.passwordHash = await bcrypt.hash(parsed.newPassword, 12);
+    await user.save();
+
+    await RefreshTokenModel.updateMany(
+      { userId: user._id, revokedAt: null },
+      { $set: { revokedAt: new Date() } },
+    );
+
+    clearRefreshCookie(res);
+    res.status(200).json({
+      message: 'Password changed successfully. Please log in again.',
+    });
   } catch (err) {
     next(err);
   }

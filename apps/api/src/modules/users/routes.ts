@@ -9,12 +9,16 @@ import {
   updateUserRoleSchema,
   updateUserStatusSchema,
 } from '@dokanos/shared';
-import { UserModel } from '../../models/index.js';
+import { RefreshTokenModel, UserModel } from '../../models/index.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { requireTenant } from '../../middleware/tenant.js';
 import { requirePermission } from '../../middleware/rbac.js';
 import { AppError } from '../../utils/errors.js';
-import { toObjectIdParam } from '../../utils/pagination.js';
+import {
+  buildPaginationMeta,
+  parsePagination,
+  toObjectIdParam,
+} from '../../utils/pagination.js';
 import { recordAuditLog } from '../../utils/audit.js';
 import { env } from '../../config/env.js';
 
@@ -25,14 +29,25 @@ usersRouter.use(requireAuth, requireTenant);
 // GET /api/v1/users
 usersRouter.get('/', requirePermission('staff:read'), async (req, res, next) => {
   try {
-    const users = await UserModel.find({
+    const { page, limit, skip } = parsePagination(req.query as Record<string, unknown>, 100);
+    const filter = {
       tenantId: new Types.ObjectId(req.tenant!.id),
-    })
-      .select('-passwordHash')
-      .sort({ createdAt: 1 })
-      .lean();
+    };
 
-    res.status(200).json({ data: users });
+    const [users, total] = await Promise.all([
+      UserModel.find(filter)
+        .select('-passwordHash')
+        .sort({ createdAt: 1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      UserModel.countDocuments(filter),
+    ]);
+
+    res.status(200).json({
+      data: users,
+      meta: buildPaginationMeta(page, limit, total),
+    });
   } catch (err) {
     next(err);
   }
@@ -65,9 +80,10 @@ usersRouter.post('/invite', requirePermission('staff:write'), async (req, res, n
       throw new AppError(409, ERROR_CODES.CONFLICT, 'A staff member with this email already exists');
     }
 
-    const rawInviteToken = crypto.randomBytes(24).toString('hex');
-    const tempPassword = parsed.password ?? 'Staff1234!';
-    const passwordHash = await bcrypt.hash(tempPassword, 12);
+    const rawInviteToken = crypto.randomBytes(32).toString('hex');
+    const inviteTokenHash = crypto.createHash('sha256').update(rawInviteToken).digest('hex');
+    const inviteExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+    const passwordHash = parsed.password ? await bcrypt.hash(parsed.password, 12) : '*';
 
     const created = await UserModel.create({
       name: parsed.name,
@@ -77,9 +93,11 @@ usersRouter.post('/invite', requirePermission('staff:write'), async (req, res, n
       tenantId: tenantObjectId,
       status: 'invited',
       inviteToken: rawInviteToken,
+      inviteTokenHash,
+      inviteExpiresAt,
     });
 
-    const setupLink = `${env.FRONTEND_URL}/login?invite=${rawInviteToken}&email=${encodeURIComponent(parsed.email)}`;
+    const setupLink = `${env.FRONTEND_URL}/accept-invite?token=${rawInviteToken}&email=${encodeURIComponent(parsed.email)}`;
 
     await recordAuditLog({
       tenantId: req.tenant!.id,
@@ -125,6 +143,11 @@ usersRouter.patch('/:id/role', requirePermission('staff:write'), async (req, res
     target.role = parsed.role;
     await target.save();
 
+    await RefreshTokenModel.updateMany(
+      { userId: target._id, revokedAt: null },
+      { $set: { revokedAt: new Date() } },
+    );
+
     await recordAuditLog({
       tenantId: req.tenant!.id,
       userId: req.user!.id,
@@ -159,6 +182,13 @@ usersRouter.patch('/:id/status', requirePermission('staff:write'), async (req, r
 
     target.status = parsed.status;
     await target.save();
+
+    if (parsed.status === 'disabled') {
+      await RefreshTokenModel.updateMany(
+        { userId: target._id, revokedAt: null },
+        { $set: { revokedAt: new Date() } },
+      );
+    }
 
     await recordAuditLog({
       tenantId: req.tenant!.id,
@@ -196,6 +226,11 @@ usersRouter.delete('/:id', requirePermission('staff:write'), async (req, res, ne
     }
 
     await UserModel.deleteOne({ _id: target._id, tenantId: new Types.ObjectId(req.tenant!.id) });
+
+    await RefreshTokenModel.updateMany(
+      { userId: target._id, revokedAt: null },
+      { $set: { revokedAt: new Date() } },
+    );
 
     await recordAuditLog({
       tenantId: req.tenant!.id,

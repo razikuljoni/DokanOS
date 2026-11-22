@@ -2,6 +2,7 @@ import type { Request, RequestHandler } from 'express';
 import jwt from 'jsonwebtoken';
 import type { PlanType, Role } from '@dokanos/shared';
 import { env } from '../config/env.js';
+import { UserModel } from '../models/index.js';
 import { AppError } from '../utils/errors.js';
 
 export interface AuthUserContext {
@@ -45,7 +46,7 @@ export function signAccessToken(payload: JwtAccessPayload): string {
   });
 }
 
-export const requireAuth: RequestHandler = (req: Request, _res, next) => {
+export const requireAuth: RequestHandler = async (req: Request, _res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     next(AppError.unauthorized('Missing or invalid Authorization header'));
@@ -60,9 +61,15 @@ export const requireAuth: RequestHandler = (req: Request, _res, next) => {
 
   try {
     const decoded = jwt.verify(token, env.JWT_ACCESS_SECRET) as JwtAccessPayload;
+    const userDoc = await UserModel.findById(decoded.sub).select('status role').lean();
+    if (!userDoc || userDoc.status !== 'active') {
+      next(AppError.unauthorized('User account has been deactivated'));
+      return;
+    }
+
     req.user = {
       id: decoded.sub,
-      role: decoded.role,
+      role: userDoc.role,
       tenantId: decoded.tenantId,
       email: decoded.email,
       name: decoded.name,

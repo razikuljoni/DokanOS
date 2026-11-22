@@ -636,6 +636,11 @@ export function DuesPage(): React.ReactElement {
                   onChange={(e) => setPaymentAmount(e.target.value)}
                   className="font-mono tabular-nums"
                 />
+                {Number(paymentAmount) > paymentTarget.dueAmount && (
+                  <div className="text-xs text-destructive font-medium pt-1">
+                    Amount cannot exceed outstanding balance of {formatBDT(paymentTarget.dueAmount)}.
+                  </div>
+                )}
               </div>
 
               <div className="space-y-1">
@@ -665,7 +670,11 @@ export function DuesPage(): React.ReactElement {
               </Button>
               <Button
                 size="sm"
-                disabled={recordPaymentMutation.isPending || Number(paymentAmount) <= 0}
+                disabled={
+                  recordPaymentMutation.isPending ||
+                  Number(paymentAmount) <= 0 ||
+                  Number(paymentAmount) > paymentTarget.dueAmount
+                }
                 onClick={() => recordPaymentMutation.mutate()}
               >
                 {recordPaymentMutation.isPending

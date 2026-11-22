@@ -2,6 +2,7 @@ import { Router, type Request } from 'express';
 import mongoose, { Types } from 'mongoose';
 import axios from 'axios';
 import Stripe from 'stripe';
+import rateLimit from 'express-rate-limit';
 import {
   BILLING_PERIODS,
   BILLING_PERIOD_DAYS,
@@ -28,13 +29,20 @@ import { AppError } from '../../utils/errors.js';
 import { env } from '../../config/env.js';
 import { emitToTenant } from '../../realtime/socket.js';
 import { recordAuditLog } from '../../utils/audit.js';
+import { sendResendEmail } from '../notifications/routes.js';
 
 // §7 Single BillingProvider interface
 export interface CheckoutSessionResult {
   provider: 'sslcommerz' | 'stripe' | 'bkash';
   gatewayUrl: string;
   tranId: string;
-  mode: 'sandbox' | 'test';
+  mode: 'sandbox' | 'test' | 'live';
+}
+
+export interface CustomerCheckoutInfo {
+  phone?: string;
+  address?: string;
+  city?: string;
 }
 
 export interface BillingProvider {
@@ -43,9 +51,49 @@ export interface BillingProvider {
     user: { name: string; email: string },
     plan: PlanType,
     period: BillingPeriod,
+    customerInfo?: CustomerCheckoutInfo,
   ): Promise<CheckoutSessionResult>;
   handleWebhook(req: Request): Promise<{ processed: boolean; duplicate: boolean; tranId: string }>;
   getSubscription(tenantId: string): Promise<unknown>;
+}
+
+interface PaymentReceiptInfo {
+  shopName: string;
+  amount: number;
+  currency: string;
+  period: BillingPeriod;
+  tranId: string;
+  expiresAt: Date;
+  recipientEmail?: string;
+}
+
+export async function sendPaymentReceiptEmail(params: {
+  to: string;
+  shopName: string;
+  amount: number;
+  currency: string;
+  period: BillingPeriod;
+  tranId: string;
+  provider: string;
+  expiresAt: Date;
+}): Promise<boolean> {
+  const periodLabel = params.period === 'annual' ? 'Annual (365 days)' : 'Monthly (30 days)';
+  return sendResendEmail({
+    to: params.to,
+    subject: `[DokanOS] Payment Receipt: ${params.currency} ${params.amount.toLocaleString()} for ${params.shopName}`,
+    html: `
+      <h2>DokanOS Payment Receipt</h2>
+      <p>Thank you for upgrading your subscription for <strong>${params.shopName}</strong>.</p>
+      <table style="border-collapse:collapse;width:100%;max-width:500px">
+        <tr><td style="padding:8px 0"><strong>Transaction ID:</strong></td><td>${params.tranId}</td></tr>
+        <tr><td style="padding:8px 0"><strong>Gateway:</strong></td><td>${params.provider.toUpperCase()}</td></tr>
+        <tr><td style="padding:8px 0"><strong>Plan / Period:</strong></td><td>DokanOS Pro (${periodLabel})</td></tr>
+        <tr><td style="padding:8px 0"><strong>Amount Paid:</strong></td><td>${params.currency} ${params.amount.toLocaleString()}</td></tr>
+        <tr><td style="padding:8px 0"><strong>Valid Until:</strong></td><td>${params.expiresAt.toISOString().slice(0, 10)}</td></tr>
+      </table>
+      <p style="margin-top:16px">Manage your billing anytime at <a href="${frontendBaseUrl()}/app/billing">DokanOS Billing Portal</a>.</p>
+    `,
+  });
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -103,24 +151,42 @@ export async function validateAndApplySslCommerzPayment(params: {
   let validatedAmount = existingPayment.amount;
   let validatedCurrency = existingPayment.currency;
 
-  if (valId && env.SSLCZ_STORE_ID !== 'testbox' && env.NODE_ENV === 'production') {
-    const valUrl = `https://sandbox.sslcommerz.com/validator/api/validationserverAPI.php?val_id=${encodeURIComponent(
+  if (env.NODE_ENV === 'production') {
+    if (!valId) {
+      throw AppError.badRequest('val_id is required for payment verification');
+    }
+    if (env.SSLCZ_STORE_ID === 'testbox') {
+      throw AppError.badRequest('Testbox store cannot be used for production validation');
+    }
+
+    const valBaseUrl = env.SSLCZ_SANDBOX
+      ? 'https://sandbox.sslcommerz.com/validator/api/validationserverAPI.php'
+      : 'https://securepay.sslcommerz.com/validator/api/validationserverAPI.php';
+    const valUrl = `${valBaseUrl}?val_id=${encodeURIComponent(
       valId,
     )}&store_id=${encodeURIComponent(env.SSLCZ_STORE_ID)}&store_passwd=${encodeURIComponent(
       env.SSLCZ_STORE_PASSWD,
     )}&v=1&format=json`;
-    const response = await axios.get<{
-      status?: string;
-      tran_id?: string;
-      amount?: string | number;
-      currency_type?: string;
-    }>(valUrl, { timeout: 8000 });
 
-    validatedStatus = response.data.status ?? 'FAILED';
-    validatedAmount = Number(response.data.amount ?? 0);
-    validatedCurrency = response.data.currency_type ?? 'BDT';
+    try {
+      const response = await axios.get<{
+        status?: string;
+        tran_id?: string;
+        amount?: string | number;
+        currency_type?: string;
+      }>(valUrl, { timeout: 8000 });
+
+      validatedStatus = response.data.status ?? 'FAILED';
+      validatedAmount = Number(response.data.amount ?? 0);
+      validatedCurrency = response.data.currency_type ?? 'BDT';
+    } catch {
+      validatedStatus = 'FAILED';
+    }
   } else {
-    // In sandbox/test mode, verify that any supplied amount/currency matches the stored payment row
+    // In sandbox/test mode (dev/test environments only), require val_id and verify amounts
+    if (!valId) {
+      throw AppError.badRequest('val_id is required for payment validation');
+    }
     if (params.amount !== undefined && Number(params.amount) !== existingPayment.amount) {
       throw AppError.badRequest('Validated amount does not match stored Payment record');
     }
@@ -143,6 +209,7 @@ export async function validateAndApplySslCommerzPayment(params: {
 
   const session = await mongoose.startSession();
   let wasUpdated = false;
+  const receiptRef: { current: PaymentReceiptInfo | null } = { current: null };
 
   try {
     await session.withTransaction(async () => {
@@ -218,9 +285,36 @@ export async function validateAndApplySslCommerzPayment(params: {
       );
 
       emitToTenant(tenant._id.toString(), 'notification:new', notification);
+
+      const owner = await UserModel.findOne({ tenantId: tenant._id, role: 'owner' })
+        .session(session)
+        .lean();
+      receiptRef.current = {
+        shopName: tenant.name,
+        amount: existingPayment.amount,
+        currency: existingPayment.currency,
+        period,
+        tranId,
+        expiresAt: newExpiresAt,
+        recipientEmail: owner?.email,
+      };
     });
   } finally {
     await session.endSession();
+  }
+
+  const receipt = receiptRef.current;
+  if (wasUpdated && receipt?.recipientEmail) {
+    void sendPaymentReceiptEmail({
+      to: receipt.recipientEmail,
+      shopName: receipt.shopName,
+      amount: receipt.amount,
+      currency: receipt.currency,
+      period: receipt.period,
+      tranId: receipt.tranId,
+      provider: 'sslcommerz',
+      expiresAt: receipt.expiresAt,
+    });
   }
 
   return {
@@ -237,6 +331,7 @@ class SslCommerzBillingProvider implements BillingProvider {
     user: { name: string; email: string },
     _plan: PlanType,
     period: BillingPeriod,
+    customerInfo?: CustomerCheckoutInfo,
   ): Promise<CheckoutSessionResult> {
     const tranId = `DKN-${tenant.slug.toUpperCase().slice(0, 10)}-${Date.now()}`;
     const amount = BILLING_PERIOD_PRICE_BDT[period];
@@ -251,57 +346,84 @@ class SslCommerzBillingProvider implements BillingProvider {
       currency: 'BDT',
       status: 'pending',
       purpose: 'subscription',
-      raw: { initiatedBy: user.email, period },
+      raw: {
+        initiatedBy: user.email,
+        period,
+        customerInfo: {
+          phone: customerInfo?.phone,
+          address: customerInfo?.address,
+          city: customerInfo?.city,
+        },
+      },
     });
 
-    // Attempt live sandbox call when in production sandbox mode; fall back to local sandbox simulator redirect in development
+    const isSandbox = env.SSLCZ_SANDBOX;
+    const gatewayApiUrl = isSandbox
+      ? 'https://sandbox.sslcommerz.com/gwprocess/v4/api.php'
+      : 'https://securepay.sslcommerz.com/gwprocess/v4/api.php';
+
+    const cusName = user.name || tenant.name || 'DokanOS Merchant';
+    const cusEmail = user.email || 'billing@dokanos.app';
+    const cusPhone = customerInfo?.phone?.trim() || '01711111111';
+    const cusAdd1 = customerInfo?.address?.trim() || 'Dhaka, Bangladesh';
+    const cusCity = customerInfo?.city?.trim() || 'Dhaka';
+
     let gatewayUrl = `/app/billing?sandbox_checkout=sslcommerz&tran_id=${encodeURIComponent(tranId)}&amount=${amount}&period=${period}`;
 
-    if (env.NODE_ENV === 'production' && env.SSLCZ_SANDBOX) {
-      try {
-        const formData = new URLSearchParams({
-          store_id: env.SSLCZ_STORE_ID,
-          store_passwd: env.SSLCZ_STORE_PASSWD,
-          total_amount: String(amount),
-          currency: 'BDT',
-          tran_id: tranId,
-          success_url: env.SSLCZ_SUCCESS_URL,
-          fail_url: env.SSLCZ_FAIL_URL,
-          cancel_url: env.SSLCZ_CANCEL_URL,
-          ipn_url: env.SSLCZ_IPN_URL,
-          cus_name: user.name,
-          cus_email: user.email,
-          cus_add1: 'Mirpur-10, Dhaka',
-          cus_city: 'Dhaka',
-          cus_country: 'Bangladesh',
-          cus_phone: '01700000000',
-          shipping_method: 'NO',
-          product_name: productName,
-          product_category: 'Subscription',
-          product_profile: 'non-physical-goods',
-        });
+    const formData = new URLSearchParams({
+      store_id: env.SSLCZ_STORE_ID,
+      store_passwd: env.SSLCZ_STORE_PASSWD,
+      total_amount: String(amount),
+      currency: 'BDT',
+      tran_id: tranId,
+      success_url: env.SSLCZ_SUCCESS_URL,
+      fail_url: env.SSLCZ_FAIL_URL,
+      cancel_url: env.SSLCZ_CANCEL_URL,
+      ipn_url: env.SSLCZ_IPN_URL,
+      cus_name: cusName,
+      cus_email: cusEmail,
+      cus_add1: cusAdd1,
+      cus_city: cusCity,
+      cus_country: 'Bangladesh',
+      cus_phone: cusPhone,
+      shipping_method: 'NO',
+      product_name: productName,
+      product_category: 'Subscription',
+      product_profile: 'general',
+    });
 
-        const resp = await axios.post<{ status?: string; GatewayPageURL?: string }>(
-          'https://sandbox.sslcommerz.com/gwprocess/v4/api.php',
-          formData.toString(),
-          {
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            timeout: 8000,
-          },
+    try {
+      const resp = await axios.post<{
+        status?: string;
+        failedreason?: string;
+        GatewayPageURL?: string;
+      }>(gatewayApiUrl, formData.toString(), {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        timeout: 10000,
+      });
+
+      if (resp.data?.status === 'SUCCESS' && resp.data.GatewayPageURL) {
+        gatewayUrl = resp.data.GatewayPageURL;
+      } else if (env.NODE_ENV === 'production') {
+        throw AppError.badRequest(
+          `SSLCommerz session initialization failed: ${resp.data?.failedreason || resp.data?.status || 'Unknown gateway error'}`,
         );
-        if (resp.data?.GatewayPageURL) {
-          gatewayUrl = resp.data.GatewayPageURL;
-        }
-      } catch {
-        // Fallback to built-in SSLCommerz Sandbox test card modal
       }
+    } catch (err) {
+      if (err instanceof AppError) throw err;
+      if (env.NODE_ENV === 'production') {
+        throw AppError.badRequest(
+          `Failed to connect to SSLCommerz gateway: ${err instanceof Error ? err.message : 'Network error'}`,
+        );
+      }
+      // Non-production fallback to local simulator URL
     }
 
     return {
       provider: 'sslcommerz',
       gatewayUrl,
       tranId,
-      mode: 'sandbox',
+      mode: isSandbox ? 'sandbox' : 'live',
     };
   }
 
@@ -362,90 +484,206 @@ class StripeTestBillingProvider implements BillingProvider {
       raw: { initiatedBy: user.email, testMode: true, period },
     });
 
-    const gatewayUrl = `/app/billing?sandbox_checkout=stripe&tran_id=${encodeURIComponent(tranId)}&amount=${amount}&period=${period}`;
+    let gatewayUrl = `/app/billing?sandbox_checkout=stripe&tran_id=${encodeURIComponent(tranId)}&amount=${amount}&period=${period}`;
+
+    if (env.STRIPE_SECRET_KEY && env.STRIPE_SECRET_KEY !== 'sk_test_placeholder') {
+      try {
+        const stripe = new Stripe(env.STRIPE_SECRET_KEY);
+        const session = await stripe.checkout.sessions.create({
+          mode: 'payment',
+          client_reference_id: tranId,
+          customer_email: user.email,
+          line_items: [
+            {
+              price_data: {
+                currency: 'bdt',
+                unit_amount: amount * 100, // smallest currency unit (poisha)
+                product_data: {
+                  name: `DokanOS Pro (${BILLING_PERIOD_DAYS[period]} days)`,
+                  description: `DokanOS Pro subscription for ${tenant.name}`,
+                },
+              },
+              quantity: 1,
+            },
+          ],
+          metadata: {
+            tranId,
+            tenantId: tenant.id,
+            period,
+          },
+          success_url: `${frontendBaseUrl()}/app/billing?status=success&tran_id=${encodeURIComponent(tranId)}`,
+          cancel_url: `${frontendBaseUrl()}/app/billing?status=cancelled&tran_id=${encodeURIComponent(tranId)}`,
+        });
+
+        if (session.url) {
+          gatewayUrl = session.url;
+        }
+      } catch (err) {
+        if (env.NODE_ENV === 'production') {
+          throw AppError.badRequest(
+            `Stripe checkout creation failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+          );
+        }
+      }
+    } else if (env.NODE_ENV === 'production') {
+      throw AppError.badRequest('Stripe secret key is not configured');
+    }
 
     return {
       provider: 'stripe',
       gatewayUrl,
       tranId,
-      mode: 'test',
+      mode: env.STRIPE_SECRET_KEY?.startsWith('sk_live_') ? 'live' : 'test',
     };
   }
 
   async handleWebhook(
     req: Request,
   ): Promise<{ processed: boolean; duplicate: boolean; tranId: string }> {
-    const body = req.body as {
-      id?: string;
-      type?: string;
-      data?: { object?: { client_reference_id?: string; metadata?: { tranId?: string } } };
-      tran_id?: string;
-    };
-
-    // If Stripe webhook signature header is present and real secret configured, verify signature
     const sig = req.headers['stripe-signature'];
-    if (
-      typeof sig === 'string' &&
-      env.STRIPE_SECRET_KEY &&
-      env.STRIPE_WEBHOOK_SECRET &&
-      env.STRIPE_WEBHOOK_SECRET !== 'whsec_placeholder'
-    ) {
-      const stripe = new Stripe(env.STRIPE_SECRET_KEY);
-      stripe.webhooks.constructEvent(JSON.stringify(req.body), sig, env.STRIPE_WEBHOOK_SECRET);
+    if (!sig || typeof sig !== 'string') {
+      throw AppError.badRequest('Missing stripe-signature header');
     }
 
+    const secret = env.STRIPE_WEBHOOK_SECRET;
+    if (!secret || secret === 'whsec_placeholder') {
+      throw AppError.badRequest('Stripe webhook secret is not configured');
+    }
+
+    const stripeKey = env.STRIPE_SECRET_KEY || 'sk_test_placeholder';
+    const stripe = new Stripe(stripeKey);
+
+    const rawBody =
+      (req as unknown as { rawBody?: Buffer }).rawBody ??
+      (Buffer.isBuffer(req.body)
+        ? req.body
+        : Buffer.from(typeof req.body === 'string' ? req.body : JSON.stringify(req.body)));
+
+    let event: Stripe.Event;
+    try {
+      event = stripe.webhooks.constructEvent(rawBody, sig, secret);
+    } catch (err) {
+      throw AppError.badRequest(
+        `Stripe signature verification failed: ${err instanceof Error ? err.message : 'Invalid signature'}`,
+      );
+    }
+
+    if (
+      event.type !== 'checkout.session.completed' &&
+      event.type !== 'payment_intent.succeeded'
+    ) {
+      return { processed: false, duplicate: false, tranId: event.id };
+    }
+
+    const sessionObj = event.data.object as {
+      id?: string;
+      metadata?: { tranId?: string };
+      client_reference_id?: string;
+    };
     const tranId =
-      body.tran_id ??
-      body.data?.object?.metadata?.tranId ??
-      body.data?.object?.client_reference_id ??
-      body.id ??
+      sessionObj.metadata?.tranId ??
+      sessionObj.client_reference_id ??
+      sessionObj.id ??
       '';
 
     if (!tranId) {
-      throw AppError.badRequest('Missing Stripe event reference or tran_id');
+      throw AppError.badRequest('Missing Stripe transaction identifier');
     }
 
-    const existing = await PaymentModel.findOne({ provider: 'stripe', eventId: tranId });
-    if (!existing) {
-      throw AppError.notFound('Stripe payment record not found');
+    const session = await mongoose.startSession();
+    let wasUpdated = false;
+    const receiptRef: { current: PaymentReceiptInfo | null } = { current: null };
+
+    try {
+      await session.withTransaction(async () => {
+        const paymentUpdate = await PaymentModel.findOneAndUpdate(
+          {
+            provider: 'stripe',
+            eventId: tranId,
+            status: 'pending',
+          },
+          {
+            $set: {
+              status: 'paid',
+              raw: event,
+            },
+          },
+          { session, new: true },
+        );
+
+        if (!paymentUpdate) {
+          wasUpdated = false;
+          return;
+        }
+
+        wasUpdated = true;
+        const tenant = await TenantModel.findById(paymentUpdate.tenantId).session(session);
+        if (!tenant) {
+          throw AppError.notFound('Tenant not found for payment');
+        }
+
+        const baseDate =
+          tenant.plan === 'pro' &&
+          tenant.planExpiresAt &&
+          tenant.planExpiresAt.getTime() > Date.now()
+            ? tenant.planExpiresAt.getTime()
+            : Date.now();
+        const period = resolvePeriodFromPayment(paymentUpdate);
+        const newExpiresAt = new Date(baseDate + periodDaysMs(period));
+
+        await TenantModel.findByIdAndUpdate(
+          paymentUpdate.tenantId,
+          {
+            $set: { plan: 'pro', planExpiresAt: newExpiresAt, trialEndsAt: null },
+          },
+          { session },
+        );
+
+        await SubscriptionModel.findOneAndUpdate(
+          { tenantId: paymentUpdate.tenantId, provider: 'stripe' },
+          {
+            $set: {
+              plan: 'pro',
+              status: 'active',
+              currentPeriodEnd: newExpiresAt,
+              providerSubscriptionId: tranId,
+            },
+          },
+          { upsert: true, session },
+        );
+
+        const owner = await UserModel.findOne({ tenantId: paymentUpdate.tenantId, role: 'owner' })
+          .session(session)
+          .lean();
+        receiptRef.current = {
+          shopName: tenant.name,
+          amount: paymentUpdate.amount,
+          currency: paymentUpdate.currency,
+          period,
+          tranId,
+          expiresAt: newExpiresAt,
+          recipientEmail: owner?.email,
+        };
+      });
+    } finally {
+      await session.endSession();
     }
 
-    if (existing.status === 'paid') {
-      return { processed: true, duplicate: true, tranId };
+    const receipt = receiptRef.current;
+    if (wasUpdated && receipt?.recipientEmail) {
+      void sendPaymentReceiptEmail({
+        to: receipt.recipientEmail,
+        shopName: receipt.shopName,
+        amount: receipt.amount,
+        currency: receipt.currency,
+        period: receipt.period,
+        tranId: receipt.tranId,
+        provider: 'stripe',
+        expiresAt: receipt.expiresAt,
+      });
     }
 
-    existing.status = 'paid';
-    await existing.save();
-
-    // Same stacking rule as SSLCommerz: paid time extends any active period
-    // (including a running trial) instead of resetting it.
-    const tenant = await TenantModel.findById(existing.tenantId);
-    const baseDate =
-      tenant?.plan === 'pro' &&
-      tenant.planExpiresAt &&
-      tenant.planExpiresAt.getTime() > Date.now()
-        ? tenant.planExpiresAt.getTime()
-        : Date.now();
-    const period = resolvePeriodFromPayment(existing);
-    const newExpiresAt = new Date(baseDate + periodDaysMs(period));
-    await TenantModel.findByIdAndUpdate(existing.tenantId, {
-      $set: { plan: 'pro', planExpiresAt: newExpiresAt, trialEndsAt: null },
-    });
-
-    await SubscriptionModel.findOneAndUpdate(
-      { tenantId: existing.tenantId, provider: 'stripe' },
-      {
-        $set: {
-          plan: 'pro',
-          status: 'active',
-          currentPeriodEnd: newExpiresAt,
-          providerSubscriptionId: tranId,
-        },
-      },
-      { upsert: true },
-    );
-
-    return { processed: true, duplicate: false, tranId };
+    return { processed: true, duplicate: !wasUpdated, tranId };
   }
 
   async getSubscription(tenantId: string): Promise<unknown> {
@@ -492,14 +730,57 @@ export const billingRouter = Router();
 
 const frontendBaseUrl = (): string => env.FRONTEND_URL.replace(/\/$/, '');
 
+const billingCallbackLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 60,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: {
+    error: {
+      code: ERROR_CODES.RATE_LIMITED,
+      message: 'Too many payment callback requests. Please try again later.',
+    },
+  },
+});
+
 async function handleSslCommerzSuccess(
   req: Request,
   res: import('express').Response,
   next: import('express').NextFunction,
 ): Promise<void> {
   try {
+    if (req.method === 'GET') {
+      const tranId = String(req.query.tran_id ?? '');
+      if (!tranId) {
+        throw AppError.badRequest('Missing tran_id parameter');
+      }
+      const payment = await PaymentModel.findOne({ provider: 'sslcommerz', eventId: tranId }).lean();
+      if (!payment) {
+        throw AppError.notFound(`Payment transaction '${tranId}' not found`);
+      }
+      if (req.headers.accept?.includes('application/json') || req.query.format === 'json') {
+        res.status(200).json({
+          data: {
+            tranId,
+            status: payment.status,
+            duplicate: payment.status === 'paid',
+          },
+        });
+        return;
+      }
+      // Pure read-only redirect to frontend billing view: no state mutation on GET
+      res.redirect(
+        `${frontendBaseUrl()}/app/billing?status=${payment.status === 'paid' ? 'success' : 'pending'}&tran_id=${encodeURIComponent(tranId)}`,
+      );
+      return;
+    }
+
     const result = await sslCommerzProvider.handleWebhook(req);
-    if (req.headers.accept?.includes('application/json') || req.query.format === 'json') {
+    if (
+      req.is('json') ||
+      req.headers.accept?.includes('application/json') ||
+      req.query.format === 'json'
+    ) {
       res.status(200).json({ data: result });
       return;
     }
@@ -518,12 +799,23 @@ async function handleSslCommerzFail(
 ): Promise<void> {
   try {
     const tranId = String((req.body as { tran_id?: string })?.tran_id ?? req.query.tran_id ?? '');
-    if (tranId) {
-      await PaymentModel.updateOne(
-        { provider: 'sslcommerz', eventId: tranId, status: 'pending' },
-        { $set: { status: 'failed' } },
-      );
+    if (!tranId) {
+      throw AppError.badRequest('Missing tran_id parameter');
     }
+    const payment = await PaymentModel.findOne({ provider: 'sslcommerz', eventId: tranId }).lean();
+    if (!payment) {
+      throw AppError.notFound(`Payment transaction '${tranId}' not found`);
+    }
+
+    if (req.method === 'POST') {
+      if (payment.status === 'pending') {
+        await PaymentModel.updateOne(
+          { provider: 'sslcommerz', eventId: tranId, status: 'pending' },
+          { $set: { status: 'failed', raw: req.body } },
+        );
+      }
+    }
+
     if (req.method === 'GET' && !req.headers.accept?.includes('application/json')) {
       res.redirect(
         `${frontendBaseUrl()}/app/billing?status=failed&tran_id=${encodeURIComponent(tranId)}`,
@@ -543,12 +835,23 @@ async function handleSslCommerzCancel(
 ): Promise<void> {
   try {
     const tranId = String((req.body as { tran_id?: string })?.tran_id ?? req.query.tran_id ?? '');
-    if (tranId) {
-      await PaymentModel.updateOne(
-        { provider: 'sslcommerz', eventId: tranId, status: 'pending' },
-        { $set: { status: 'failed' } },
-      );
+    if (!tranId) {
+      throw AppError.badRequest('Missing tran_id parameter');
     }
+    const payment = await PaymentModel.findOne({ provider: 'sslcommerz', eventId: tranId }).lean();
+    if (!payment) {
+      throw AppError.notFound(`Payment transaction '${tranId}' not found`);
+    }
+
+    if (req.method === 'POST') {
+      if (payment.status === 'pending') {
+        await PaymentModel.updateOne(
+          { provider: 'sslcommerz', eventId: tranId, status: 'pending' },
+          { $set: { status: 'failed', raw: req.body } },
+        );
+      }
+    }
+
     if (req.method === 'GET' && !req.headers.accept?.includes('application/json')) {
       res.redirect(
         `${frontendBaseUrl()}/app/billing?status=cancelled&tran_id=${encodeURIComponent(tranId)}`,
@@ -559,6 +862,12 @@ async function handleSslCommerzCancel(
   } catch (err) {
     next(err);
   }
+}
+
+// Rate limiting on public gateway callback routes outside test environment
+if (env.NODE_ENV !== 'test') {
+  billingRouter.use('/sslcommerz', billingCallbackLimiter);
+  billingRouter.use('/stripe', billingCallbackLimiter);
 }
 
 // Public SSLCommerz callbacks & IPN (registered BEFORE requireAuth/requireTenant for both GET and POST)
@@ -649,6 +958,53 @@ function parseBillingPeriod(body: unknown): BillingPeriod {
   throw AppError.badRequest("Invalid billing period. Expected 'monthly' or 'annual'.");
 }
 
+/**
+ * Reconciliation job: polls pending payments older than 30 minutes, marks them failed,
+ * and updates expired active subscriptions to past_due.
+ */
+export async function reconcilePendingPayments(): Promise<{
+  checked: number;
+  expired: number;
+  syncedSubscriptions: number;
+}> {
+  const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
+  const pendingPayments = await PaymentModel.find({
+    status: 'pending',
+    createdAt: { $lt: thirtyMinutesAgo },
+  }).limit(50);
+
+  let expired = 0;
+  for (const payment of pendingPayments) {
+    await PaymentModel.updateOne(
+      { _id: payment._id, status: 'pending' },
+      {
+        $set: {
+          status: 'failed',
+          raw: {
+            ...((payment.raw as Record<string, unknown>) || {}),
+            reconciliation: 'expired_after_30m_timeout',
+          },
+        },
+      },
+    );
+    expired += 1;
+  }
+
+  const expiredSubscriptions = await SubscriptionModel.find({
+    status: 'active',
+    currentPeriodEnd: { $lt: new Date() },
+  }).limit(50);
+
+  let syncedSubscriptions = 0;
+  for (const sub of expiredSubscriptions) {
+    sub.status = 'past_due';
+    await sub.save();
+    syncedSubscriptions += 1;
+  }
+
+  return { checked: pendingPayments.length, expired, syncedSubscriptions };
+}
+
 // POST /api/v1/billing/sslcommerz/init
 billingRouter.post(
   '/sslcommerz/init',
@@ -656,11 +1012,17 @@ billingRouter.post(
   async (req, res, next) => {
     try {
       const period = parseBillingPeriod(req.body);
+      const { phone, address, city } = (req.body ?? {}) as {
+        phone?: string;
+        address?: string;
+        city?: string;
+      };
       const checkout = await sslCommerzProvider.createCheckout(
         req.tenant!,
         { name: req.user!.name, email: req.user!.email },
         'pro',
         period,
+        { phone, address, city },
       );
       res.status(201).json({
         data: {
@@ -678,9 +1040,9 @@ billingRouter.post(
   },
 );
 
-// POST /api/v1/billing/stripe/checkout
+// POST /api/v1/billing/stripe/checkout or /stripe/init
 billingRouter.post(
-  '/stripe/checkout',
+  ['/stripe/checkout', '/stripe/init'],
   requirePermission('billing:write'),
   async (req, res, next) => {
     try {
@@ -717,6 +1079,16 @@ billingRouter.post('/bkash/init', requirePermission('billing:write'), async (req
       parseBillingPeriod(req.body),
     );
     res.status(501).json({});
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/billing/reconcile
+billingRouter.post('/reconcile', requirePermission('billing:write'), async (_req, res, next) => {
+  try {
+    const result = await reconcilePendingPayments();
+    res.status(200).json({ data: result });
   } catch (err) {
     next(err);
   }

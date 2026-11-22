@@ -529,7 +529,7 @@ export function SalesListPage(): React.ReactElement {
                   shopName={tenant?.name}
                   shopType={tenant?.type}
                   shopSlug={tenant?.slug}
-                  cashierName={selectedSale.soldBy?.name ?? user?.name}
+                  cashierName={selectedSale.soldBy?.name ?? 'Counter Staff'}
                   paperWidth={paperWidth}
                 />
               </div>
@@ -604,7 +604,15 @@ export function SalesListPage(): React.ReactElement {
                   variant="destructive"
                   size="sm"
                   disabled={returnMutation.isPending}
-                  onClick={() => returnMutation.mutate(selectedSale._id)}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Are you sure you want to return invoice ${selectedSale.invoiceNo} and restock all items back into shop inventory?`,
+                      )
+                    ) {
+                      returnMutation.mutate(selectedSale._id);
+                    }
+                  }}
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
                   {returnMutation.isPending ? 'Restocking...' : 'Return & Restock'}

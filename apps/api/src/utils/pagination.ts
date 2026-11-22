@@ -37,3 +37,7 @@ export function toObjectIdParam(
   }
   return new Types.ObjectId(str);
 }
+
+export function escapeRegex(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}

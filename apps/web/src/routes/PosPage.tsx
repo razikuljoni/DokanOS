@@ -267,6 +267,10 @@ export function PosPage(): React.ReactElement {
 
   const createSaleMutation = useMutation({
     mutationFn: async () => {
+      if (bakiDueAmount > 0 && !customerName.trim()) {
+        throw new Error('Customer Name is required for Baki (credit) sales.');
+      }
+
       if (isOffline) {
         return completeOfflineSale();
       }
@@ -648,10 +652,19 @@ export function PosPage(): React.ReactElement {
               </div>
 
               {/* Primary CTA matches Stitch Appendix note: "Settle & Print Receipt" */}
+              {bakiDueAmount > 0 && !customerName.trim() && (
+                <div className="text-xs text-destructive font-medium p-2 bg-destructive/10 rounded border border-destructive/20 text-center">
+                  ⚠️ Customer Name is required for Baki sales
+                </div>
+              )}
               <Button
                 className="w-full"
                 size="lg"
-                disabled={cart.length === 0 || createSaleMutation.isPending}
+                disabled={
+                  cart.length === 0 ||
+                  createSaleMutation.isPending ||
+                  (bakiDueAmount > 0 && !customerName.trim())
+                }
                 onClick={() => createSaleMutation.mutate()}
               >
                 <Printer className="h-4 w-4" />

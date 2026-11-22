@@ -75,6 +75,10 @@ export interface IUser extends Document {
   tenantId: Types.ObjectId | null;
   status: UserStatus;
   inviteToken?: string | null;
+  inviteTokenHash?: string | null;
+  inviteExpiresAt?: Date | null;
+  resetPasswordTokenHash?: string | null;
+  resetPasswordExpiresAt?: Date | null;
   lastLoginAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -89,6 +93,10 @@ const userSchema = new Schema<IUser>(
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', default: null },
     status: { type: String, enum: USER_STATUSES, default: 'active' },
     inviteToken: { type: String, default: null },
+    inviteTokenHash: { type: String, default: null },
+    inviteExpiresAt: { type: Date, default: null },
+    resetPasswordTokenHash: { type: String, default: null },
+    resetPasswordExpiresAt: { type: Date, default: null },
     lastLoginAt: { type: Date, default: null },
   },
   {
@@ -96,6 +104,8 @@ const userSchema = new Schema<IUser>(
     toJSON: {
       transform(_doc, ret: Record<string, unknown>) {
         delete ret.passwordHash;
+        delete ret.resetPasswordTokenHash;
+        delete ret.inviteTokenHash;
         return ret;
       },
     },
@@ -103,6 +113,8 @@ const userSchema = new Schema<IUser>(
 );
 
 userSchema.index({ tenantId: 1, email: 1 }, { unique: true });
+userSchema.index({ inviteTokenHash: 1 }, { sparse: true });
+userSchema.index({ resetPasswordTokenHash: 1 }, { sparse: true });
 
 export const UserModel =
   (mongoose.models.User as mongoose.Model<IUser> | undefined) ??
@@ -248,6 +260,7 @@ export interface ISale extends Document {
   dueAmount: number;
   customerName: string;
   customerPhone: string;
+  customerId?: Types.ObjectId | null;
   soldBy: Types.ObjectId;
   isReturned: boolean;
   createdAt: Date;
@@ -281,6 +294,7 @@ const saleSchema = new Schema<ISale>(
     dueAmount: { type: Number, required: true, min: 0 },
     customerName: { type: String, default: 'Walk-in Customer' },
     customerPhone: { type: String, default: '' },
+    customerId: { type: Schema.Types.ObjectId, ref: 'Customer', default: null },
     soldBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     isReturned: { type: Boolean, default: false },
   },
@@ -289,6 +303,9 @@ const saleSchema = new Schema<ISale>(
 
 saleSchema.index({ tenantId: 1, createdAt: -1 });
 saleSchema.index({ tenantId: 1, invoiceNo: 1 }, { unique: true });
+saleSchema.index({ tenantId: 1, dueAmount: 1 });
+saleSchema.index({ tenantId: 1, paymentStatus: 1 });
+saleSchema.index({ tenantId: 1, customerId: 1 });
 saleSchema.index(
   { tenantId: 1, idempotencyKey: 1 },
   { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } },
@@ -326,6 +343,39 @@ const supplierSchema = new Schema<ISupplier>(
 export const SupplierModel =
   (mongoose.models.Supplier as mongoose.Model<ISupplier> | undefined) ??
   mongoose.model<ISupplier>('Supplier', supplierSchema);
+
+// 7b. Customer
+export interface ICustomer extends Document {
+  _id: Types.ObjectId;
+  tenantId: Types.ObjectId;
+  name: string;
+  phone: string;
+  address?: string;
+  balanceDue: number;
+  totalSpent: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const customerSchema = new Schema<ICustomer>(
+  {
+    tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
+    name: { type: String, required: true, trim: true },
+    phone: { type: String, required: true, trim: true },
+    address: { type: String, default: '', trim: true },
+    balanceDue: { type: Number, default: 0, min: 0 },
+    totalSpent: { type: Number, default: 0, min: 0 },
+  },
+  { timestamps: true },
+);
+
+customerSchema.index({ tenantId: 1, phone: 1 }, { unique: true });
+customerSchema.index({ tenantId: 1, name: 1 });
+customerSchema.index({ tenantId: 1, balanceDue: -1 });
+
+export const CustomerModel =
+  (mongoose.models.Customer as mongoose.Model<ICustomer> | undefined) ??
+  mongoose.model<ICustomer>('Customer', customerSchema);
 
 // 8. Purchase
 export interface IPurchaseItem {
@@ -377,6 +427,9 @@ const purchaseSchema = new Schema<IPurchase>(
   { timestamps: true },
 );
 
+purchaseSchema.index({ tenantId: 1, supplierId: 1 });
+purchaseSchema.index({ tenantId: 1, createdAt: -1 });
+
 export const PurchaseModel =
   (mongoose.models.Purchase as mongoose.Model<IPurchase> | undefined) ??
   mongoose.model<IPurchase>('Purchase', purchaseSchema);
@@ -415,6 +468,7 @@ duePaymentSchema.index(
   { tenantId: 1, idempotencyKey: 1 },
   { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } },
 );
+duePaymentSchema.index({ tenantId: 1, createdAt: -1 });
 
 export const DuePaymentModel =
   (mongoose.models.DuePayment as mongoose.Model<IDuePayment> | undefined) ??
@@ -554,6 +608,40 @@ const auditLogSchema = new Schema<IAuditLog>(
   { timestamps: { createdAt: true, updatedAt: false } },
 );
 
+auditLogSchema.index({ tenantId: 1, createdAt: -1 });
+
 export const AuditLogModel =
   (mongoose.models.AuditLog as mongoose.Model<IAuditLog> | undefined) ??
   mongoose.model<IAuditLog>('AuditLog', auditLogSchema);
+
+// 14. JobRun (Persistent background job execution log)
+export interface IJobRun extends Document {
+  _id: Types.ObjectId;
+  jobName: string;
+  tenantId?: Types.ObjectId | null;
+  status: 'completed' | 'failed';
+  summary: string;
+  error?: string | null;
+  durationMs: number;
+  triggeredBy: 'scheduler' | 'cron' | 'manual';
+  createdAt: Date;
+}
+
+const jobRunSchema = new Schema<IJobRun>(
+  {
+    jobName: { type: String, required: true, index: true },
+    tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', default: null },
+    status: { type: String, enum: ['completed', 'failed'], required: true },
+    summary: { type: String, required: true },
+    error: { type: String, default: null },
+    durationMs: { type: Number, default: 0 },
+    triggeredBy: { type: String, enum: ['scheduler', 'cron', 'manual'], default: 'scheduler' },
+  },
+  { timestamps: { createdAt: true, updatedAt: false } },
+);
+
+jobRunSchema.index({ jobName: 1, createdAt: -1 });
+
+export const JobRunModel =
+  (mongoose.models.JobRun as mongoose.Model<IJobRun> | undefined) ??
+  mongoose.model<IJobRun>('JobRun', jobRunSchema);

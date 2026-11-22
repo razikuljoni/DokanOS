@@ -6,6 +6,7 @@ import { requireAuth } from '../../middleware/auth.js';
 import { requireTenant } from '../../middleware/tenant.js';
 import { requirePermission } from '../../middleware/rbac.js';
 import { buildPaginationMeta, parsePagination, toObjectIdParam } from '../../utils/pagination.js';
+import { AppError } from '../../utils/errors.js';
 import { env } from '../../config/env.js';
 import { logger } from '../../config/logger.js';
 
@@ -23,14 +24,14 @@ export class NoOpSmsProvider implements SmsProvider {
 
 export const smsProvider: SmsProvider = new NoOpSmsProvider();
 
-// §8 Resend Email helper (Pro only for digests/reminders)
-export async function sendDigestEmail(params: {
+// §8 Resend Email helper (Pro only for digests/reminders/receipts)
+export async function sendResendEmail(params: {
   to: string;
   subject: string;
   html: string;
 }): Promise<boolean> {
   if (!env.RESEND_API_KEY || env.RESEND_API_KEY === 're_placeholder_key') {
-    logger.info('Resend API key not configured; email digest logged locally', {
+    logger.info('Resend API key not configured; email logged locally', {
       to: params.to,
       subject: params.subject,
     });
@@ -38,9 +39,10 @@ export async function sendDigestEmail(params: {
   }
 
   try {
+    const fromAddress = env.RESEND_FROM_EMAIL || 'DokanOS <onboarding@resend.dev>';
     const resend = new Resend(env.RESEND_API_KEY);
     await resend.emails.send({
-      from: 'DokanOS <onboarding@resend.dev>',
+      from: fromAddress,
       to: params.to,
       subject: params.subject,
       html: params.html,
@@ -53,6 +55,8 @@ export async function sendDigestEmail(params: {
     return false;
   }
 }
+
+export const sendDigestEmail = sendResendEmail;
 
 export const notificationsRouter = Router();
 
@@ -142,14 +146,22 @@ notificationsRouter.patch(
   async (req, res, next) => {
     try {
       const notifObjectId = toObjectIdParam(req.params.id, 'Notification not found');
+      const tenantObjectId = new Types.ObjectId(req.tenant!.id);
+      const userObjectId = new Types.ObjectId(req.user!.id);
+
       const updated = await NotificationModel.findOneAndUpdate(
         {
           _id: notifObjectId,
-          tenantId: new Types.ObjectId(req.tenant!.id),
+          tenantId: tenantObjectId,
+          $or: [{ userId: null }, { userId: userObjectId }],
         },
         { $set: { isRead: true } },
         { new: true },
       ).lean();
+
+      if (!updated) {
+        throw AppError.notFound('Notification not found');
+      }
 
       res.status(200).json({ data: updated });
     } catch (err) {

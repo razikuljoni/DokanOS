@@ -7,9 +7,7 @@ import {
   Calendar,
   Check,
   CheckCircle2,
-  MessageSquare,
   Package,
-  Quote,
   ReceiptText,
   ShieldCheck,
   Terminal,
@@ -20,6 +18,7 @@ import { useAuthStore, type AuthTenant, type AuthUser } from '@/stores/authStore
 import { useUiStore } from '@/stores/uiStore';
 
 export function LandingPage(): React.ReactElement {
+  const isDemoEnabled = import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEMO_LOGIN === 'true';
   const navigate = useNavigate();
   const setAuth = useAuthStore((s) => s.setAuth);
   const accessToken = useAuthStore((s) => s.accessToken);
@@ -149,21 +148,23 @@ export function LandingPage(): React.ReactElement {
             >
               Start free
             </Link>
-            <button
-              type="button"
-              onClick={() => {
-                void handleTryDemoShop();
-              }}
-              disabled={loadingDemo}
-              className="inline-flex items-center justify-center rounded-md border border-[#E7E0D4] bg-white px-6 py-2.5 text-xs sm:text-sm font-semibold text-[#1C1917] hover:bg-[#F3EFE6] transition-colors cursor-pointer disabled:opacity-60"
-            >
-              {loadingDemo ? 'Opening Demo Shop...' : 'Try the demo shop'}
-            </button>
+            {isDemoEnabled && (
+              <button
+                type="button"
+                onClick={() => {
+                  void handleTryDemoShop();
+                }}
+                disabled={loadingDemo}
+                className="inline-flex items-center justify-center rounded-md border border-[#E7E0D4] bg-white px-6 py-2.5 text-xs sm:text-sm font-semibold text-[#1C1917] hover:bg-[#F3EFE6] transition-colors cursor-pointer disabled:opacity-60"
+              >
+                {loadingDemo ? 'Opening Demo Shop...' : 'Try the demo shop'}
+              </button>
+            )}
           </div>
 
           <div className="mt-5 flex items-center justify-center gap-1.5 text-xs text-[#57534E]">
             <CheckCircle2 className="h-3.5 w-3.5 text-[#14532D] shrink-0" />
-            <span>Trusted by 2,400+ shops in Dhaka, Chattogram and Khulna</span>
+            <span>Purpose-built for independent retail shops and pharmacies</span>
           </div>
         </section>
 
@@ -179,17 +180,19 @@ export function LandingPage(): React.ReactElement {
                 />
                 <div>
                   <div className="font-display text-sm font-bold text-[#1C1917]">
-                    Rahim Pharmacy — Live Ledger
+                    Rahim Pharmacy — Demo Shop Preview
                   </div>
                   <div className="text-[11px] text-[#57534E]">
-                    Counter 01 · Mirpur-10, Dhaka · Active Session
+                    Counter 01 · Mirpur-10, Dhaka · Pre-seeded demo dataset
                   </div>
                 </div>
               </div>
 
               <div className="inline-flex items-center gap-1.5 rounded-md border border-[#E7E0D4] bg-white px-2.5 py-1 text-[11px] font-medium text-[#57534E] self-start sm:self-auto">
                 <Calendar className="h-3 w-3 text-[#57534E]" />
-                <span className="tabular-nums">Today, 24 Oct</span>
+                <span className="tabular-nums">
+                  Today, {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                </span>
               </div>
             </div>
 
@@ -290,7 +293,7 @@ export function LandingPage(): React.ReactElement {
                     </td>
                     <td className="py-3.5 px-3 whitespace-nowrap">
                       <span className="inline-block rounded border border-[#E7E0D4] bg-[#F3EFE6] px-2 py-0.5 text-[10px] font-mono font-semibold text-[#1C1917]">
-                        bKash QR
+                        bKash
                       </span>
                     </td>
                     <td className="py-3.5 pl-3 pr-6 text-right font-mono font-semibold text-[#1C1917] tabular-nums whitespace-nowrap">
@@ -327,19 +330,29 @@ export function LandingPage(): React.ReactElement {
             <div className="px-6 py-3 bg-[#FAF7F2] border-t border-[#E7E0D4] flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-[#57534E]">
               <div className="flex items-center gap-2">
                 <Terminal className="h-3.5 w-3.5 text-[#14532D] shrink-0" />
-                <span>Ledger synchronized with DokanOS cloud (Dhaka Server)</span>
+                <span>Interactive demo ledger synchronized with DokanOS cloud</span>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  void handleTryDemoShop();
-                }}
-                disabled={loadingDemo}
-                className="inline-flex items-center gap-1 font-semibold text-[#1C1917] hover:text-[#14532D] transition-colors cursor-pointer self-start sm:self-auto"
-              >
-                <span>Open Full Ledger</span>
-                <ArrowRight className="h-3 w-3" />
-              </button>
+              {isDemoEnabled ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleTryDemoShop();
+                  }}
+                  disabled={loadingDemo}
+                  className="inline-flex items-center gap-1 font-semibold text-[#1C1917] hover:text-[#14532D] transition-colors cursor-pointer self-start sm:self-auto"
+                >
+                  <span>Open Full Ledger</span>
+                  <ArrowRight className="h-3 w-3" />
+                </button>
+              ) : (
+                <Link
+                  to="/register"
+                  className="inline-flex items-center gap-1 font-semibold text-[#1C1917] hover:text-[#14532D] transition-colors cursor-pointer self-start sm:self-auto"
+                >
+                  <span>Create Free Account</span>
+                  <ArrowRight className="h-3 w-3" />
+                </Link>
+              )}
             </div>
           </div>
         </section>
@@ -428,11 +441,11 @@ export function LandingPage(): React.ReactElement {
                   </div>
 
                   <h3 className="font-display text-sm font-bold text-[#1C1917] pt-1">
-                    Fast counter sales with Cash, bKash and Card
+                    Fast counter sales with Cash, Mobile Banking and Card
                   </h3>
                   <p className="text-xs text-[#57534E] leading-relaxed">
                     Lightning-fast barcode scanning or quick-search keyboard shortcuts. Accept
-                    physical cash, generate instant bKash dynamic merchant QR, or card payments.
+                    physical cash, mobile banking transfers, or card payments with split payment support.
                   </p>
                 </div>
 
@@ -480,8 +493,8 @@ export function LandingPage(): React.ReactElement {
                     Customer and supplier credit ledger with ageing
                   </h3>
                   <p className="text-xs text-[#57534E] leading-relaxed">
-                    Digitize your traditional Khatiyan. Automatic SMS balance reminders, ageing
-                    reports (0–30, 30–60, 60+ days), and clear payment history per customer.
+                    Digitize your traditional Khatiyan. Customer credit ledgers, ageing
+                    reports (0–7, 8–30, 30+ days), and clear payment history per customer.
                   </p>
                 </div>
 
@@ -493,16 +506,18 @@ export function LandingPage(): React.ReactElement {
                       <span className="font-mono font-semibold text-[#B45309]">৳1,400</span>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleTryDemoShop();
-                    }}
-                    className="inline-flex items-center gap-1.5 rounded border border-[#E7E0D4] bg-white px-2.5 py-1.5 text-[11px] font-medium text-[#1C1917] hover:bg-[#F3EFE6] transition-colors shrink-0 cursor-pointer"
-                  >
-                    <MessageSquare className="h-3 w-3 text-[#57534E]" />
-                    <span>Send SMS Reminder</span>
-                  </button>
+                    {isDemoEnabled && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleTryDemoShop();
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded border border-[#E7E0D4] bg-white px-2.5 py-1.5 text-[11px] font-medium text-[#1C1917] hover:bg-[#F3EFE6] transition-colors shrink-0 cursor-pointer"
+                      >
+                        <BookOpen className="h-3 w-3 text-[#57534E]" />
+                        <span>View Customer Ledger</span>
+                      </button>
+                    )}
                 </div>
               </article>
 
@@ -526,7 +541,7 @@ export function LandingPage(): React.ReactElement {
                     Invoices, receipts and daily reports
                   </h3>
                   <p className="text-xs text-[#57534E] leading-relaxed">
-                    Print 58mm/80mm thermal receipts or send instant digital WhatsApp receipts.
+                    Print 58mm/80mm thermal receipts or export digital invoices.
                     End-of-day Hisab summaries showing gross profit, cash in drawer, and dues
                     collected.
                   </p>
@@ -588,11 +603,11 @@ export function LandingPage(): React.ReactElement {
                   02 / Add products
                 </div>
                 <div className="text-xs font-bold text-[#1C1917]">
-                  Instant barcode &amp; DGDA sync
+                  Barcode scanning &amp; CSV import
                 </div>
                 <p className="text-xs text-[#57534E] leading-relaxed">
-                  Scan barcodes or import your existing price list in seconds with pre-loaded
-                  Bangladesh medicine and grocery databases.
+                  Scan barcodes or import your existing inventory in seconds with batch import
+                  and custom medicine or grocery categories.
                 </p>
               </div>
 
@@ -605,7 +620,7 @@ export function LandingPage(): React.ReactElement {
                 </div>
                 <p className="text-xs text-[#57534E] leading-relaxed">
                   Start billing customers at the counter, log Baki instantly, and collect payments
-                  via bKash QR, Nagad or cash without discrepancies.
+                  via mobile banking or cash without discrepancies.
                 </p>
               </div>
             </div>
@@ -708,7 +723,7 @@ export function LandingPage(): React.ReactElement {
                 </div>
 
                 <p className="text-xs text-[#57534E] leading-relaxed">
-                  Full ledger power with SMS notifications and staff governance for active retail.
+                  Full ledger power with customer accounts, staff permissions, and audit logs.
                 </p>
 
                 <hr className="border-[#E7E0D4]" />
@@ -720,7 +735,7 @@ export function LandingPage(): React.ReactElement {
                   </li>
                   <li className="flex items-center gap-2.5">
                     <Check className="h-3.5 w-3.5 text-[#14532D] shrink-0" />
-                    <span>Multi-counter &amp; multi-shop support</span>
+                    <span>Multi-counter staff accounts &amp; RBAC</span>
                   </li>
                   <li className="flex items-center gap-2.5">
                     <Check className="h-3.5 w-3.5 text-[#14532D] shrink-0" />
@@ -728,7 +743,7 @@ export function LandingPage(): React.ReactElement {
                   </li>
                   <li className="flex items-center gap-2.5">
                     <Check className="h-3.5 w-3.5 text-[#14532D] shrink-0" />
-                    <span>Automated SMS Baki reminders</span>
+                    <span>Customer Baki ageing reports &amp; history</span>
                   </li>
                   <li className="flex items-center gap-2.5">
                     <Check className="h-3.5 w-3.5 text-[#14532D] shrink-0" />
@@ -736,7 +751,7 @@ export function LandingPage(): React.ReactElement {
                   </li>
                   <li className="flex items-center gap-2.5">
                     <Check className="h-3.5 w-3.5 text-[#14532D] shrink-0" />
-                    <span>Priority WhatsApp &amp; phone support</span>
+                    <span>Email digests &amp; priority support</span>
                   </li>
                 </ul>
               </div>
@@ -760,35 +775,35 @@ export function LandingPage(): React.ReactElement {
           </div>
         </section>
 
-        {/* 7. Testimonial + Final CTA */}
-        <section id="testimony" className="bg-[#F3EFE6]/70 border-t border-[#E7E0D4] py-14 px-6">
+        {/* 7. Architecture Guarantee */}
+        <section id="guarantee" className="bg-[#F3EFE6]/70 border-t border-[#E7E0D4] py-14 px-6">
           <div className="max-w-3xl mx-auto rounded-xl border border-[#E7E0D4] bg-white p-8 space-y-5">
             <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-wider font-semibold text-[#57534E]">
-              <Quote className="h-4 w-4 text-[#14532D]" />
-              <span>MERCHANT TESTIMONY</span>
+              <ShieldCheck className="h-4 w-4 text-[#14532D]" />
+              <span>LEDGER INTEGRITY GUARANTEE</span>
             </div>
 
-            <blockquote className="font-display text-lg sm:text-xl font-bold text-[#1C1917] leading-snug">
-              &ldquo;DokanOS cut our stock-outs and made Baki collection easy. We recovered over
-              ৳45,000 in overdue customer credit in the first month alone.&rdquo;
-            </blockquote>
+            <p className="font-display text-lg sm:text-xl font-bold text-[#1C1917] leading-snug">
+              Every POS sale, purchase order, return, and Baki payment is recorded inside atomic
+              database transactions with zero negative stock guards and immutable audit trails.
+            </p>
 
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-4 border-t border-[#E7E0D4]">
               <div className="flex items-center gap-3">
                 <div className="h-9 w-9 rounded-full border border-[#E7E0D4] bg-[#FAF7F2] flex items-center justify-center font-display text-xs font-bold text-[#14532D] shrink-0">
-                  RU
+                  ACID
                 </div>
                 <div>
-                  <div className="text-xs font-bold text-[#1C1917]">Rahim Uddin</div>
+                  <div className="text-xs font-bold text-[#1C1917]">Multi-Document ACID Transactions</div>
                   <div className="text-[11px] text-[#57534E]">
-                    Proprietor, Rahim Pharmacy — Mirpur-10, Dhaka
+                    MongoDB Replica Set &middot; Tenant-Scoped Isolation
                   </div>
                 </div>
               </div>
 
               <div className="inline-flex items-center gap-1.5 rounded bg-[#DCFCE7] px-2.5 py-1 text-[10px] font-semibold text-[#14532D] self-start sm:self-auto">
                 <CheckCircle2 className="h-3 w-3 text-[#14532D]" />
-                <span>Verified Merchant</span>
+                <span>Verified Architecture</span>
               </div>
             </div>
           </div>
@@ -800,7 +815,7 @@ export function LandingPage(): React.ReactElement {
               Ready to bring order to your shop&rsquo;s ledger?
             </h2>
             <p className="text-xs sm:text-sm text-[#57534E]">
-              Join 2,400+ shop owners across Bangladesh today.
+              Replace scattered paper khata notebooks with a modern, high-density digital ledger.
             </p>
             <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
               <Link
@@ -809,16 +824,18 @@ export function LandingPage(): React.ReactElement {
               >
                 Start free today
               </Link>
-              <button
-                type="button"
-                onClick={() => {
-                  void handleTryDemoShop();
-                }}
-                disabled={loadingDemo}
-                className="inline-flex items-center justify-center rounded-md border border-[#E7E0D4] bg-white px-6 py-2.5 text-xs font-semibold text-[#1C1917] hover:bg-[#F3EFE6] transition-colors cursor-pointer disabled:opacity-60"
-              >
-                {loadingDemo ? 'Opening Demo Shop...' : 'Try the live demo shop'}
-              </button>
+              {isDemoEnabled && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleTryDemoShop();
+                  }}
+                  disabled={loadingDemo}
+                  className="inline-flex items-center justify-center rounded-md border border-[#E7E0D4] bg-white px-6 py-2.5 text-xs font-semibold text-[#1C1917] hover:bg-[#F3EFE6] transition-colors cursor-pointer disabled:opacity-60"
+                >
+                  {loadingDemo ? 'Opening Demo Shop...' : 'Try the live demo shop'}
+                </button>
+              )}
             </div>
           </div>
         </section>
@@ -880,17 +897,19 @@ export function LandingPage(): React.ReactElement {
                   Pricing
                 </a>
               </li>
-              <li>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleTryDemoShop();
-                  }}
-                  className="hover:text-[#1C1917] transition-colors cursor-pointer text-left"
-                >
-                  Demo Shop
-                </button>
-              </li>
+              {isDemoEnabled && (
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleTryDemoShop();
+                    }}
+                    className="hover:text-[#1C1917] transition-colors cursor-pointer text-left"
+                  >
+                    Demo Shop
+                  </button>
+                </li>
+              )}
             </ul>
           </div>
 
@@ -905,19 +924,25 @@ export function LandingPage(): React.ReactElement {
                 </a>
               </li>
               <li>
-                <a href="#testimony" className="hover:text-[#1C1917] transition-colors">
-                  Customers
+                <a href="#guarantee" className="hover:text-[#1C1917] transition-colors">
+                  Architecture
                 </a>
               </li>
               <li>
-                <Link to="/register" className="hover:text-[#1C1917] transition-colors">
+                <a
+                  href="mailto:support@dokan-os.demo?subject=Careers%20Inquiry"
+                  className="hover:text-[#1C1917] transition-colors"
+                >
                   Careers
-                </Link>
+                </a>
               </li>
               <li>
-                <Link to="/login" className="hover:text-[#1C1917] transition-colors">
+                <a
+                  href="mailto:support@dokan-os.demo?subject=Contact%20DokanOS"
+                  className="hover:text-[#1C1917] transition-colors"
+                >
                   Contact
-                </Link>
+                </a>
               </li>
             </ul>
           </div>
@@ -928,23 +953,26 @@ export function LandingPage(): React.ReactElement {
             </div>
             <ul className="space-y-2 text-xs">
               <li>
-                <Link to="/login" className="hover:text-[#1C1917] transition-colors">
+                <a
+                  href="mailto:support@dokan-os.demo?subject=Help%20Center%20Support"
+                  className="hover:text-[#1C1917] transition-colors"
+                >
                   Help Center
-                </Link>
+                </a>
               </li>
               <li>
                 <a href="#billing" className="hover:text-[#1C1917] transition-colors">
-                  bKash Setup Guide
+                  Billing &amp; Payment Options
                 </a>
               </li>
               <li>
                 <a href="#pos" className="hover:text-[#1C1917] transition-colors">
-                  Hardware Compatibility
+                  Thermal Printer Setup (58mm/80mm)
                 </a>
               </li>
               <li>
-                <a href="#inventory" className="hover:text-[#1C1917] transition-colors">
-                  Security
+                <a href="#guarantee" className="hover:text-[#1C1917] transition-colors">
+                  Data Security &amp; Backups
                 </a>
               </li>
             </ul>

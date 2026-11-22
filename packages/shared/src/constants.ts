@@ -83,6 +83,8 @@ export const PERMISSIONS = {
   'purchases:write': ['owner', 'manager'],
   'suppliers:read': ['owner', 'manager'],
   'suppliers:write': ['owner', 'manager'],
+  'customers:read': ['owner', 'manager', 'staff'],
+  'customers:write': ['owner', 'manager', 'staff'],
   'dues:read': ['owner', 'manager'],
   'dues:write': ['owner', 'manager'],
   'dashboard:read': ['owner', 'manager', 'staff'],
