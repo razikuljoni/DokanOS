@@ -5,7 +5,13 @@ import { useAuthStore } from '@/stores/authStore';
 import { tryRefreshSession } from '@/lib/api';
 import { AppShell } from '@/components/AppShell';
 import { LandingPage } from '@/routes/LandingPage';
-import { LoginPage, RegisterPage } from '@/routes/AuthPages';
+import {
+  AcceptInvitePage,
+  ForgotPasswordPage,
+  LoginPage,
+  RegisterPage,
+  ResetPasswordPage,
+} from '@/routes/AuthPages';
 
 const DashboardPage = lazy(() => import('@/routes/DashboardPage').then((m) => ({ default: m.DashboardPage })));
 const PosPage = lazy(() => import('@/routes/PosPage').then((m) => ({ default: m.PosPage })));
@@ -77,6 +83,9 @@ export default function App(): React.ReactElement {
           <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/accept-invite" element={<AcceptInvitePage />} />
 
           <Route path="/app" element={<ProtectedAppRoutes />}>
             <Route index element={<Navigate to="/app/dashboard" replace />} />

@@ -17,6 +17,10 @@ import {
   updateTenantSettingsSchema,
   updateUserRoleSchema,
   updateUserStatusSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
+  changePasswordSchema,
+  acceptInviteSchema,
 } from './schemas.js';
 import type { ErrorCode } from './constants.js';
 
@@ -37,6 +41,10 @@ export type InviteStaffInput = z.infer<typeof inviteStaffSchema>;
 export type UpdateUserRoleInput = z.infer<typeof updateUserRoleSchema>;
 export type UpdateUserStatusInput = z.infer<typeof updateUserStatusSchema>;
 export type BillingCheckoutInitInput = z.infer<typeof billingCheckoutInitSchema>;
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+export type AcceptInviteInput = z.infer<typeof acceptInviteSchema>;
 
 export interface ApiErrorResponse {
   error: {

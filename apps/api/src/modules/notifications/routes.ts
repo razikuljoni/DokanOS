@@ -6,6 +6,7 @@ import { requireAuth } from '../../middleware/auth.js';
 import { requireTenant } from '../../middleware/tenant.js';
 import { requirePermission } from '../../middleware/rbac.js';
 import { buildPaginationMeta, parsePagination, toObjectIdParam } from '../../utils/pagination.js';
+import { AppError } from '../../utils/errors.js';
 import { env } from '../../config/env.js';
 import { logger } from '../../config/logger.js';
 
@@ -145,14 +146,22 @@ notificationsRouter.patch(
   async (req, res, next) => {
     try {
       const notifObjectId = toObjectIdParam(req.params.id, 'Notification not found');
+      const tenantObjectId = new Types.ObjectId(req.tenant!.id);
+      const userObjectId = new Types.ObjectId(req.user!.id);
+
       const updated = await NotificationModel.findOneAndUpdate(
         {
           _id: notifObjectId,
-          tenantId: new Types.ObjectId(req.tenant!.id),
+          tenantId: tenantObjectId,
+          $or: [{ userId: null }, { userId: userObjectId }],
         },
         { $set: { isRead: true } },
         { new: true },
       ).lean();
+
+      if (!updated) {
+        throw AppError.notFound('Notification not found');
+      }
 
       res.status(200).json({ data: updated });
     } catch (err) {

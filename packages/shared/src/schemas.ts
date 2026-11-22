@@ -117,3 +117,23 @@ export const billingCheckoutInitSchema = z.object({
   address: z.string().optional(),
   city: z.string().optional(),
 });
+
+export const forgotPasswordSchema = z.object({
+  email: z.string().trim().email('Invalid email address').toLowerCase(),
+});
+
+export const resetPasswordSchema = z.object({
+  token: z.string().trim().min(1, 'Reset token is required'),
+  newPassword: z.string().min(8, 'Password must be at least 8 characters').max(100),
+});
+
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password is required'),
+  newPassword: z.string().min(8, 'New password must be at least 8 characters').max(100),
+});
+
+export const acceptInviteSchema = z.object({
+  inviteToken: z.string().trim().min(1, 'Invite token is required'),
+  password: z.string().min(8, 'Password must be at least 8 characters').max(100),
+});
+

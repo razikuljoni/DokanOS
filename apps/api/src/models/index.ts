@@ -75,6 +75,10 @@ export interface IUser extends Document {
   tenantId: Types.ObjectId | null;
   status: UserStatus;
   inviteToken?: string | null;
+  inviteTokenHash?: string | null;
+  inviteExpiresAt?: Date | null;
+  resetPasswordTokenHash?: string | null;
+  resetPasswordExpiresAt?: Date | null;
   lastLoginAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -89,6 +93,10 @@ const userSchema = new Schema<IUser>(
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', default: null },
     status: { type: String, enum: USER_STATUSES, default: 'active' },
     inviteToken: { type: String, default: null },
+    inviteTokenHash: { type: String, default: null },
+    inviteExpiresAt: { type: Date, default: null },
+    resetPasswordTokenHash: { type: String, default: null },
+    resetPasswordExpiresAt: { type: Date, default: null },
     lastLoginAt: { type: Date, default: null },
   },
   {
@@ -96,6 +104,8 @@ const userSchema = new Schema<IUser>(
     toJSON: {
       transform(_doc, ret: Record<string, unknown>) {
         delete ret.passwordHash;
+        delete ret.resetPasswordTokenHash;
+        delete ret.inviteTokenHash;
         return ret;
       },
     },
@@ -103,6 +113,8 @@ const userSchema = new Schema<IUser>(
 );
 
 userSchema.index({ tenantId: 1, email: 1 }, { unique: true });
+userSchema.index({ inviteTokenHash: 1 }, { sparse: true });
+userSchema.index({ resetPasswordTokenHash: 1 }, { sparse: true });
 
 export const UserModel =
   (mongoose.models.User as mongoose.Model<IUser> | undefined) ??

@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import mongoose from 'mongoose';
@@ -1337,5 +1338,238 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
     expect(authRes.status).toBe(200);
     expect(authRes.body.ok).toBe(true);
     expect(authRes.body.jobs.length).toBe(3);
+  });
+
+  // 23. Phase 4 — Password Recovery Flow (forgot-password, reset-password, change-password)
+  it('23. Phase 4 Password Recovery: forgot-password sets token hash, reset-password updates password and revokes sessions, change-password requires current password', async () => {
+    const _shop = await registerShop({
+      shopName: 'Recovery Shop',
+      email: 'recovery@dokanos.bd',
+    });
+
+    // 1. forgot-password
+    const forgotRes = await request(app)
+      .post('/api/v1/auth/forgot-password')
+      .send({ email: 'recovery@dokanos.bd' });
+    expect(forgotRes.status).toBe(200);
+
+    const user = await UserModel.findOne({ email: 'recovery@dokanos.bd' });
+    expect(user?.resetPasswordTokenHash).toBeDefined();
+    expect(user?.resetPasswordExpiresAt).toBeDefined();
+
+    // 2. reset-password with invalid token
+    const invalidReset = await request(app)
+      .post('/api/v1/auth/reset-password')
+      .send({ token: 'wrong-token-abc', newPassword: 'NewPassword123!' });
+    expect(invalidReset.status).toBe(400);
+
+    // Known raw token and hash for deterministic test
+    const rawResetToken = crypto.randomBytes(32).toString('hex');
+    const resetHash = crypto.createHash('sha256').update(rawResetToken).digest('hex');
+    await UserModel.updateOne(
+      { email: 'recovery@dokanos.bd' },
+      {
+        $set: {
+          resetPasswordTokenHash: resetHash,
+          resetPasswordExpiresAt: new Date(Date.now() + 3600000),
+        },
+      },
+    );
+
+    // 3. reset-password with valid token
+    const validReset = await request(app)
+      .post('/api/v1/auth/reset-password')
+      .send({ token: rawResetToken, newPassword: 'NewPassword123!' });
+    expect(validReset.status).toBe(200);
+
+    // Old password fails, new password succeeds
+    const oldLogin = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: 'recovery@dokanos.bd', password: 'Password123!' });
+    expect(oldLogin.status).toBe(401);
+
+    const newLogin = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: 'recovery@dokanos.bd', password: 'NewPassword123!' });
+    expect(newLogin.status).toBe(200);
+    const newAccessToken = newLogin.body.accessToken;
+
+    // 4. change-password with wrong current password
+    const wrongChange = await request(app)
+      .post('/api/v1/auth/change-password')
+      .set('Authorization', `Bearer ${newAccessToken}`)
+      .send({ currentPassword: 'WrongPassword!', newPassword: 'ThirdPassword123!' });
+    expect(wrongChange.status).toBe(401);
+
+    // 5. change-password with correct current password
+    const validChange = await request(app)
+      .post('/api/v1/auth/change-password')
+      .set('Authorization', `Bearer ${newAccessToken}`)
+      .send({ currentPassword: 'NewPassword123!', newPassword: 'ThirdPassword123!' });
+    expect(validChange.status).toBe(200);
+
+    const thirdLogin = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: 'recovery@dokanos.bd', password: 'ThirdPassword123!' });
+    expect(thirdLogin.status).toBe(200);
+  });
+
+  // 24. Phase 4 — Secure Staff Invites with Hashed Token (C4)
+  it('24. Phase 4 Invites: Staff invited without password has unusable password, can only activate via accept-invite with unexpired token', async () => {
+    const shop = await registerShop({
+      shopName: 'Invite Test Pharmacy',
+      email: 'owner@invite-test.bd',
+    });
+
+    const inviteRes = await request(app)
+      .post('/api/v1/users/invite')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({
+        name: 'Trainee Staff',
+        email: 'trainee@invite-test.bd',
+        role: 'staff',
+      });
+    expect(inviteRes.status).toBe(201);
+    expect(inviteRes.body.data.setupLink).toContain('/accept-invite?token=');
+
+    const invitedUser = await UserModel.findOne({ email: 'trainee@invite-test.bd' });
+    expect(invitedUser?.status).toBe('invited');
+    expect(invitedUser?.passwordHash).toBe('*');
+    expect(invitedUser?.inviteTokenHash).toBeDefined();
+
+    // Cannot log in with default 'Staff1234!' or anything
+    const unacceptedLogin = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: 'trainee@invite-test.bd', password: 'Staff1234!' });
+    expect(unacceptedLogin.status).toBe(401);
+
+    // Accept invite with invalid token fails
+    const badAccept = await request(app)
+      .post('/api/v1/auth/accept-invite')
+      .send({ inviteToken: 'invalid-token-12345', password: 'ChosenPassword123!' });
+    expect(badAccept.status).toBe(400);
+
+    // Accept invite with valid token succeeds
+    const tokenMatch = inviteRes.body.data.setupLink.match(/token=([a-f0-9]+)/);
+    expect(tokenMatch).not.toBeNull();
+    const rawInviteToken = tokenMatch![1];
+    const goodAccept = await request(app)
+      .post('/api/v1/auth/accept-invite')
+      .send({ inviteToken: rawInviteToken, password: 'ChosenPassword123!' });
+    expect(goodAccept.status).toBe(200);
+    expect(goodAccept.body.accessToken).toBeDefined();
+    expect(goodAccept.body.user.role).toBe('staff');
+
+    const activatedUser = await UserModel.findOne({ email: 'trainee@invite-test.bd' });
+    expect(activatedUser?.status).toBe('active');
+    expect(activatedUser?.inviteTokenHash).toBeNull();
+
+    // Replay attack with same token fails
+    const replayAccept = await request(app)
+      .post('/api/v1/auth/accept-invite')
+      .send({ inviteToken: rawInviteToken, password: 'AnotherPassword123!' });
+    expect(replayAccept.status).toBe(400);
+  });
+
+  // 25. Phase 4 — Tenant Login Isolation & Wrong Slug 404 (H3)
+  it('25. Phase 4 Tenant Isolation: Login with nonexistent tenantSlug returns 404 Shop Not Found', async () => {
+    await registerShop({
+      shopName: 'Tenant Iso Pharmacy',
+      email: 'iso@dokanos.bd',
+    });
+
+    const res = await request(app)
+      .post('/api/v1/auth/login')
+      .send({
+        email: 'iso@dokanos.bd',
+        password: 'Password123!',
+        tenantSlug: 'non-existent-shop-slug-999',
+      });
+    expect(res.status).toBe(404);
+    expect(res.body.error.message).toContain('Shop not found');
+  });
+
+  // 26. Phase 4 — Active Session Revocation on Status Disable
+  it('26. Phase 4 Token Revocation: Disabling a user revokes all active refresh tokens immediately', async () => {
+    const shop = await registerShop({
+      shopName: 'Revocation Pharmacy',
+      email: 'owner@revocation.bd',
+    });
+
+    const inviteRes = await request(app)
+      .post('/api/v1/users/invite')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({
+        name: 'Staff Revoke',
+        email: 'staff@revocation.bd',
+        role: 'staff',
+      });
+    const revokeTokenMatch = inviteRes.body.data.setupLink.match(/token=([a-f0-9]+)/);
+    expect(revokeTokenMatch).not.toBeNull();
+    const token = revokeTokenMatch![1];
+
+    const acceptRes = await request(app)
+      .post('/api/v1/auth/accept-invite')
+      .send({ inviteToken: token, password: 'StaffPassword123!' });
+    expect(acceptRes.status).toBe(200);
+
+    const cookies = acceptRes.headers['set-cookie'];
+    const staffCookie = (Array.isArray(cookies) ? cookies[0] : cookies) ?? '';
+    expect(staffCookie).toContain('dokanos_rt=');
+
+    // Refresh works before being disabled
+    const refreshBefore = await request(app)
+      .post('/api/v1/auth/refresh')
+      .set('Cookie', staffCookie);
+    expect(refreshBefore.status).toBe(200);
+    const refreshedCookie = (Array.isArray(refreshBefore.headers['set-cookie'])
+      ? refreshBefore.headers['set-cookie'][0]
+      : refreshBefore.headers['set-cookie']) ?? '';
+
+    // Owner disables staff account
+    const staffId = acceptRes.body.user.id;
+    const disableRes = await request(app)
+      .patch(`/api/v1/users/${staffId}/status`)
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({ status: 'disabled' });
+    expect(disableRes.status).toBe(200);
+
+    // Refresh immediately fails 401
+    const refreshAfter = await request(app)
+      .post('/api/v1/auth/refresh')
+      .set('Cookie', refreshedCookie);
+    expect(refreshAfter.status).toBe(401);
+  });
+
+  // 27. Phase 4 — Notification Scoping & 404
+  it('27. Phase 4 Notification Scoping: Reading notification of another user returns 404, nonexistent returns 404', async () => {
+    const shop = await registerShop({
+      shopName: 'Notif Shop',
+      email: 'notif@dokanos.bd',
+    });
+
+    const otherUserId = new mongoose.Types.ObjectId();
+    const otherUserNotif = await NotificationModel.create({
+      tenantId: shop.tenantId,
+      userId: otherUserId,
+      type: 'low_stock',
+      title: 'Private Alert',
+      body: 'Private message for other user',
+      link: '/app/alerts',
+      isRead: false,
+    });
+
+    // Owner tries to mark another user's targeted notification as read
+    const readRes = await request(app)
+      .patch(`/api/v1/notifications/${otherUserNotif._id}/read`)
+      .set('Authorization', `Bearer ${shop.accessToken}`);
+    expect(readRes.status).toBe(404);
+
+    // Nonexistent notification ID returns 404
+    const nonExistentId = new mongoose.Types.ObjectId();
+    const notFoundRes = await request(app)
+      .patch(`/api/v1/notifications/${nonExistentId}/read`)
+      .set('Authorization', `Bearer ${shop.accessToken}`);
+    expect(notFoundRes.status).toBe(404);
   });
 });
