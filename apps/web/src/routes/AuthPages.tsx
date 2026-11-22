@@ -63,6 +63,8 @@ export function LoginPage(): React.ReactElement {
     }
   };
 
+  const isDemoEnabled = import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEMO_LOGIN === 'true';
+
   const handleQuickDemoLogin = async (email = 'demo@dokan-os.demo'): Promise<void> => {
     setDemoLoading(true);
     setServerError(null);
@@ -126,46 +128,50 @@ export function LoginPage(): React.ReactElement {
             </CardHeader>
             <CardContent className="space-y-5">
               {/* One-click Demo Login */}
-              <div className="space-y-2">
-                <Button
-                  type="button"
-                  variant="default"
-                  className="w-full"
-                  disabled={demoLoading}
-                  onClick={() => void handleQuickDemoLogin('demo@dokan-os.demo')}
-                >
-                  <Store className="h-4 w-4" />
-                  {demoLoading ? 'Signing in to Rahim Pharmacy...' : 'Try the demo shop (Owner)'}
-                  <ArrowRight className="h-4 w-4" />
-                </Button>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={demoLoading}
-                    onClick={() => void handleQuickDemoLogin('manager@dokan-os.demo')}
-                  >
-                    Demo Manager Login
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={demoLoading}
-                    onClick={() => void handleQuickDemoLogin('staff@dokan-os.demo')}
-                  >
-                    Demo Staff Login
-                  </Button>
-                </div>
-              </div>
+              {isDemoEnabled && (
+                <>
+                  <div className="space-y-2">
+                    <Button
+                      type="button"
+                      variant="default"
+                      className="w-full"
+                      disabled={demoLoading}
+                      onClick={() => void handleQuickDemoLogin('demo@dokan-os.demo')}
+                    >
+                      <Store className="h-4 w-4" />
+                      {demoLoading ? 'Signing in to Rahim Pharmacy...' : 'Try the demo shop (Owner)'}
+                      <ArrowRight className="h-4 w-4" />
+                    </Button>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={demoLoading}
+                        onClick={() => void handleQuickDemoLogin('manager@dokan-os.demo')}
+                      >
+                        Demo Manager Login
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={demoLoading}
+                        onClick={() => void handleQuickDemoLogin('staff@dokan-os.demo')}
+                      >
+                        Demo Staff Login
+                      </Button>
+                    </div>
+                  </div>
 
-              <div className="relative flex items-center justify-center">
-                <Separator />
-                <span className="bg-card px-2 text-xs text-muted-foreground absolute">
-                  or sign in with email
-                </span>
-              </div>
+                  <div className="relative flex items-center justify-center">
+                    <Separator />
+                    <span className="bg-card px-2 text-xs text-muted-foreground absolute">
+                      or sign in with email
+                    </span>
+                  </div>
+                </>
+              )}
 
               {serverError && (
                 <div className="p-3 rounded-md bg-destructive/10 border border-destructive text-xs text-destructive">

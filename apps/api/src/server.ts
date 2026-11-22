@@ -16,7 +16,7 @@ async function bootstrap(): Promise<void> {
   initRedis();
   initInProcessJobsWorker();
 
-  if (env.SEED_DEMO) {
+  if (env.NODE_ENV !== 'production' && env.SEED_DEMO) {
     await seedDemoData(false);
   }
 

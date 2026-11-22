@@ -28,15 +28,41 @@ const nodeEnvRaw = process.env.NODE_ENV ?? 'development';
 const nodeEnv: EnvConfig['NODE_ENV'] =
   nodeEnvRaw === 'production' || nodeEnvRaw === 'test' ? nodeEnvRaw : 'development';
 
+const DEV_JWT_ACCESS = 'dev-jwt-access-secret-minimum-32-characters-long';
+const DEV_REFRESH = 'dev-refresh-cookie-secret-minimum-32-characters';
+const DEV_COOKIE = 'dev-cookie-secret-minimum-32-characters-long';
+
+if (nodeEnv === 'production') {
+  const missing: string[] = [];
+  if (!process.env.MONGODB_URI) {
+    missing.push('MONGODB_URI');
+  }
+  if (!process.env.JWT_ACCESS_SECRET || process.env.JWT_ACCESS_SECRET === DEV_JWT_ACCESS) {
+    missing.push('JWT_ACCESS_SECRET');
+  }
+  if (!process.env.REFRESH_TOKEN_SECRET || process.env.REFRESH_TOKEN_SECRET === DEV_REFRESH) {
+    missing.push('REFRESH_TOKEN_SECRET');
+  }
+  if (!process.env.COOKIE_SECRET || process.env.COOKIE_SECRET === DEV_COOKIE) {
+    missing.push('COOKIE_SECRET');
+  }
+  if (!process.env.FRONTEND_URL) {
+    missing.push('FRONTEND_URL');
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `FATAL: Production boot failed due to missing or unsafe environment variables: ${missing.join(', ')}`,
+    );
+  }
+}
+
 export const env: EnvConfig = {
   PORT: Number(process.env.PORT ?? 4000),
   NODE_ENV: nodeEnv,
   MONGODB_URI: process.env.MONGODB_URI ?? 'mongodb://localhost:27017/dokanos',
-  JWT_ACCESS_SECRET:
-    process.env.JWT_ACCESS_SECRET ?? 'dev-jwt-access-secret-minimum-32-characters-long',
-  REFRESH_TOKEN_SECRET:
-    process.env.REFRESH_TOKEN_SECRET ?? 'dev-refresh-cookie-secret-minimum-32-characters',
-  COOKIE_SECRET: process.env.COOKIE_SECRET ?? 'dev-cookie-secret-minimum-32-characters-long',
+  JWT_ACCESS_SECRET: process.env.JWT_ACCESS_SECRET ?? DEV_JWT_ACCESS,
+  REFRESH_TOKEN_SECRET: process.env.REFRESH_TOKEN_SECRET ?? DEV_REFRESH,
+  COOKIE_SECRET: process.env.COOKIE_SECRET ?? DEV_COOKIE,
   FRONTEND_URL: process.env.FRONTEND_URL ?? 'http://localhost:5173',
   UPSTASH_REDIS_URL: process.env.UPSTASH_REDIS_URL,
   RESEND_API_KEY: process.env.RESEND_API_KEY,
@@ -53,5 +79,5 @@ export const env: EnvConfig = {
     process.env.SSLCZ_IPN_URL ?? 'http://localhost:4000/api/v1/billing/sslcommerz/ipn',
   STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
   STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,
-  SEED_DEMO: (process.env.SEED_DEMO ?? 'true') === 'true',
+  SEED_DEMO: nodeEnv === 'production' ? false : (process.env.SEED_DEMO ?? 'true') === 'true',
 };

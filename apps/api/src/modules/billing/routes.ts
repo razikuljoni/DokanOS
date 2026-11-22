@@ -103,24 +103,42 @@ export async function validateAndApplySslCommerzPayment(params: {
   let validatedAmount = existingPayment.amount;
   let validatedCurrency = existingPayment.currency;
 
-  if (valId && env.SSLCZ_STORE_ID !== 'testbox' && env.NODE_ENV === 'production') {
-    const valUrl = `https://sandbox.sslcommerz.com/validator/api/validationserverAPI.php?val_id=${encodeURIComponent(
+  if (env.NODE_ENV === 'production') {
+    if (!valId) {
+      throw AppError.badRequest('val_id is required for payment verification');
+    }
+    if (env.SSLCZ_STORE_ID === 'testbox') {
+      throw AppError.badRequest('Testbox store cannot be used for production validation');
+    }
+
+    const valBaseUrl = env.SSLCZ_SANDBOX
+      ? 'https://sandbox.sslcommerz.com/validator/api/validationserverAPI.php'
+      : 'https://securepay.sslcommerz.com/validator/api/validationserverAPI.php';
+    const valUrl = `${valBaseUrl}?val_id=${encodeURIComponent(
       valId,
     )}&store_id=${encodeURIComponent(env.SSLCZ_STORE_ID)}&store_passwd=${encodeURIComponent(
       env.SSLCZ_STORE_PASSWD,
     )}&v=1&format=json`;
-    const response = await axios.get<{
-      status?: string;
-      tran_id?: string;
-      amount?: string | number;
-      currency_type?: string;
-    }>(valUrl, { timeout: 8000 });
 
-    validatedStatus = response.data.status ?? 'FAILED';
-    validatedAmount = Number(response.data.amount ?? 0);
-    validatedCurrency = response.data.currency_type ?? 'BDT';
+    try {
+      const response = await axios.get<{
+        status?: string;
+        tran_id?: string;
+        amount?: string | number;
+        currency_type?: string;
+      }>(valUrl, { timeout: 8000 });
+
+      validatedStatus = response.data.status ?? 'FAILED';
+      validatedAmount = Number(response.data.amount ?? 0);
+      validatedCurrency = response.data.currency_type ?? 'BDT';
+    } catch {
+      validatedStatus = 'FAILED';
+    }
   } else {
-    // In sandbox/test mode, verify that any supplied amount/currency matches the stored payment row
+    // In sandbox/test mode (dev/test environments only), require val_id and verify amounts
+    if (!valId) {
+      throw AppError.badRequest('val_id is required for payment validation');
+    }
     if (params.amount !== undefined && Number(params.amount) !== existingPayment.amount) {
       throw AppError.badRequest('Validated amount does not match stored Payment record');
     }

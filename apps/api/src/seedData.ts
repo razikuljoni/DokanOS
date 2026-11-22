@@ -15,6 +15,7 @@ import {
   UserModel,
 } from './models/index.js';
 import { logger } from './config/logger.js';
+import { env } from './config/env.js';
 import type { ProductUnit } from '@dokanos/shared';
 
 interface SeedProductSpec {
@@ -75,6 +76,10 @@ const FORTY_PRODUCTS: SeedProductSpec[] = [
 ];
 
 export async function seedDemoData(forceReset = false): Promise<void> {
+  if (env.NODE_ENV === 'production') {
+    logger.warn('seedDemoData invocation rejected: running in production environment');
+    return;
+  }
   const existingTenant = await TenantModel.findOne({ slug: 'rahim-pharmacy' });
   if (existingTenant && !forceReset) {
     const productCount = await ProductModel.countDocuments({ tenantId: existingTenant._id });

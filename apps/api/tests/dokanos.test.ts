@@ -388,6 +388,27 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
     expect(daysAdded).toBeLessThan(30.5);
   });
 
+  // 5b. Phase 0 security: SSLCommerz callback without val_id is rejected
+  it('5b. Phase 0 security: POST /api/v1/billing/sslcommerz/ipn with missing val_id is rejected with 400', async () => {
+    const shop = await registerShop({ shopName: 'ValId Check Shop', email: 'owner@validcheck.bd' });
+    const initRes = await request(app)
+      .post('/api/v1/billing/sslcommerz/init')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({});
+    expect(initRes.status).toBe(201);
+    const tranId = initRes.body.data.tranId as string;
+
+    const res = await request(app)
+      .post('/api/v1/billing/sslcommerz/ipn')
+      .send({
+        tran_id: tranId,
+        amount: 499,
+        currency: 'BDT',
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toContain('val_id is required');
+  });
+
   // 6. Aggregation correctness
   it('6. Aggregation correctness: dashboard summary revenue, COGS profit, and top products match hand-computed values', async () => {
     const shop = await registerShop({ shopName: 'Math Shop', email: 'owner@math.bd' });

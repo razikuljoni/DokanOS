@@ -20,6 +20,7 @@ import { useAuthStore, type AuthTenant, type AuthUser } from '@/stores/authStore
 import { useUiStore } from '@/stores/uiStore';
 
 export function LandingPage(): React.ReactElement {
+  const isDemoEnabled = import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEMO_LOGIN === 'true';
   const navigate = useNavigate();
   const setAuth = useAuthStore((s) => s.setAuth);
   const accessToken = useAuthStore((s) => s.accessToken);
@@ -149,16 +150,18 @@ export function LandingPage(): React.ReactElement {
             >
               Start free
             </Link>
-            <button
-              type="button"
-              onClick={() => {
-                void handleTryDemoShop();
-              }}
-              disabled={loadingDemo}
-              className="inline-flex items-center justify-center rounded-md border border-[#E7E0D4] bg-white px-6 py-2.5 text-xs sm:text-sm font-semibold text-[#1C1917] hover:bg-[#F3EFE6] transition-colors cursor-pointer disabled:opacity-60"
-            >
-              {loadingDemo ? 'Opening Demo Shop...' : 'Try the demo shop'}
-            </button>
+            {isDemoEnabled && (
+              <button
+                type="button"
+                onClick={() => {
+                  void handleTryDemoShop();
+                }}
+                disabled={loadingDemo}
+                className="inline-flex items-center justify-center rounded-md border border-[#E7E0D4] bg-white px-6 py-2.5 text-xs sm:text-sm font-semibold text-[#1C1917] hover:bg-[#F3EFE6] transition-colors cursor-pointer disabled:opacity-60"
+              >
+                {loadingDemo ? 'Opening Demo Shop...' : 'Try the demo shop'}
+              </button>
+            )}
           </div>
 
           <div className="mt-5 flex items-center justify-center gap-1.5 text-xs text-[#57534E]">
@@ -329,17 +332,27 @@ export function LandingPage(): React.ReactElement {
                 <Terminal className="h-3.5 w-3.5 text-[#14532D] shrink-0" />
                 <span>Ledger synchronized with DokanOS cloud (Dhaka Server)</span>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  void handleTryDemoShop();
-                }}
-                disabled={loadingDemo}
-                className="inline-flex items-center gap-1 font-semibold text-[#1C1917] hover:text-[#14532D] transition-colors cursor-pointer self-start sm:self-auto"
-              >
-                <span>Open Full Ledger</span>
-                <ArrowRight className="h-3 w-3" />
-              </button>
+              {isDemoEnabled ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleTryDemoShop();
+                  }}
+                  disabled={loadingDemo}
+                  className="inline-flex items-center gap-1 font-semibold text-[#1C1917] hover:text-[#14532D] transition-colors cursor-pointer self-start sm:self-auto"
+                >
+                  <span>Open Full Ledger</span>
+                  <ArrowRight className="h-3 w-3" />
+                </button>
+              ) : (
+                <Link
+                  to="/register"
+                  className="inline-flex items-center gap-1 font-semibold text-[#1C1917] hover:text-[#14532D] transition-colors cursor-pointer self-start sm:self-auto"
+                >
+                  <span>Create Free Account</span>
+                  <ArrowRight className="h-3 w-3" />
+                </Link>
+              )}
             </div>
           </div>
         </section>
@@ -493,16 +506,18 @@ export function LandingPage(): React.ReactElement {
                       <span className="font-mono font-semibold text-[#B45309]">৳1,400</span>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleTryDemoShop();
-                    }}
-                    className="inline-flex items-center gap-1.5 rounded border border-[#E7E0D4] bg-white px-2.5 py-1.5 text-[11px] font-medium text-[#1C1917] hover:bg-[#F3EFE6] transition-colors shrink-0 cursor-pointer"
-                  >
-                    <MessageSquare className="h-3 w-3 text-[#57534E]" />
-                    <span>Send SMS Reminder</span>
-                  </button>
+                    {isDemoEnabled && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleTryDemoShop();
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded border border-[#E7E0D4] bg-white px-2.5 py-1.5 text-[11px] font-medium text-[#1C1917] hover:bg-[#F3EFE6] transition-colors shrink-0 cursor-pointer"
+                      >
+                        <MessageSquare className="h-3 w-3 text-[#57534E]" />
+                        <span>Send SMS Reminder</span>
+                      </button>
+                    )}
                 </div>
               </article>
 
@@ -809,16 +824,18 @@ export function LandingPage(): React.ReactElement {
               >
                 Start free today
               </Link>
-              <button
-                type="button"
-                onClick={() => {
-                  void handleTryDemoShop();
-                }}
-                disabled={loadingDemo}
-                className="inline-flex items-center justify-center rounded-md border border-[#E7E0D4] bg-white px-6 py-2.5 text-xs font-semibold text-[#1C1917] hover:bg-[#F3EFE6] transition-colors cursor-pointer disabled:opacity-60"
-              >
-                {loadingDemo ? 'Opening Demo Shop...' : 'Try the live demo shop'}
-              </button>
+              {isDemoEnabled && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleTryDemoShop();
+                  }}
+                  disabled={loadingDemo}
+                  className="inline-flex items-center justify-center rounded-md border border-[#E7E0D4] bg-white px-6 py-2.5 text-xs font-semibold text-[#1C1917] hover:bg-[#F3EFE6] transition-colors cursor-pointer disabled:opacity-60"
+                >
+                  {loadingDemo ? 'Opening Demo Shop...' : 'Try the live demo shop'}
+                </button>
+              )}
             </div>
           </div>
         </section>
@@ -880,17 +897,19 @@ export function LandingPage(): React.ReactElement {
                   Pricing
                 </a>
               </li>
-              <li>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleTryDemoShop();
-                  }}
-                  className="hover:text-[#1C1917] transition-colors cursor-pointer text-left"
-                >
-                  Demo Shop
-                </button>
-              </li>
+              {isDemoEnabled && (
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleTryDemoShop();
+                    }}
+                    className="hover:text-[#1C1917] transition-colors cursor-pointer text-left"
+                  >
+                    Demo Shop
+                  </button>
+                </li>
+              )}
             </ul>
           </div>
 

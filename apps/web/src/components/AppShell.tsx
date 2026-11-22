@@ -204,7 +204,7 @@ export function AppShell(): React.ReactElement {
         {/* Demo RBAC Quick Switcher & User Footer */}
         {!sidebarCollapsed && (
           <div className="p-3 border-t border-[#2E2A26] space-y-3 text-xs">
-            {user?.email.endsWith('@dokan-os.demo') && (
+            {(import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEMO_LOGIN === 'true') && user?.email.endsWith('@dokan-os.demo') && (
               <div className="space-y-1.5">
                 <div className="text-[11px] text-[#A8A29E] font-medium">
                   Demo RBAC Role Switcher
