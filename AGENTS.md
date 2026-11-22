@@ -38,7 +38,6 @@
 - Build order: `pnpm --filter @dokanos/shared build` (shared schemas) -> `pnpm --filter api build` -> `pnpm build` (web).
 - Render Free deploys `apps/api` with `pnpm --filter @dokanos/shared build && pnpm --filter api build`, then runs `node apps/api/dist/server.js`.
 - Vercel Hobby deploys `apps/web` with same build order; environment variables (`VITE_API_URL`) set in Vercel dashboard.
-- AI Studio release trees need `bash scripts/prepare-release-tree.sh` before pushing to remove preview harness files (`root server.ts`, `root index.html`, etc.).
 - SSLCommerz sandbox calls require `SSLCZ_SANDBOX=true`; both testbox/qwerty and registered developer credentials work.
 - Auth tokens are memory-only (Zustand `authStore.ts`); refresh tokens stored as SHA-256 hashes in MongoDB, rotated every `30d`.
 - Tenant scoping is enforced at both middleware (`requireTenant`) and query level (`tenantId` indexed in every model).
