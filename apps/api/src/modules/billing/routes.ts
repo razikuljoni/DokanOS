@@ -2,6 +2,7 @@ import { Router, type Request } from 'express';
 import mongoose, { Types } from 'mongoose';
 import axios from 'axios';
 import Stripe from 'stripe';
+import rateLimit from 'express-rate-limit';
 import {
   BILLING_PERIODS,
   BILLING_PERIOD_DAYS,
@@ -393,77 +394,122 @@ class StripeTestBillingProvider implements BillingProvider {
   async handleWebhook(
     req: Request,
   ): Promise<{ processed: boolean; duplicate: boolean; tranId: string }> {
-    const body = req.body as {
-      id?: string;
-      type?: string;
-      data?: { object?: { client_reference_id?: string; metadata?: { tranId?: string } } };
-      tran_id?: string;
-    };
-
-    // If Stripe webhook signature header is present and real secret configured, verify signature
     const sig = req.headers['stripe-signature'];
-    if (
-      typeof sig === 'string' &&
-      env.STRIPE_SECRET_KEY &&
-      env.STRIPE_WEBHOOK_SECRET &&
-      env.STRIPE_WEBHOOK_SECRET !== 'whsec_placeholder'
-    ) {
-      const stripe = new Stripe(env.STRIPE_SECRET_KEY);
-      stripe.webhooks.constructEvent(JSON.stringify(req.body), sig, env.STRIPE_WEBHOOK_SECRET);
+    if (!sig || typeof sig !== 'string') {
+      throw AppError.badRequest('Missing stripe-signature header');
     }
 
+    const secret = env.STRIPE_WEBHOOK_SECRET;
+    if (!secret || secret === 'whsec_placeholder') {
+      throw AppError.badRequest('Stripe webhook secret is not configured');
+    }
+
+    const stripeKey = env.STRIPE_SECRET_KEY || 'sk_test_placeholder';
+    const stripe = new Stripe(stripeKey);
+
+    const rawBody =
+      (req as unknown as { rawBody?: Buffer }).rawBody ??
+      (Buffer.isBuffer(req.body)
+        ? req.body
+        : Buffer.from(typeof req.body === 'string' ? req.body : JSON.stringify(req.body)));
+
+    let event: Stripe.Event;
+    try {
+      event = stripe.webhooks.constructEvent(rawBody, sig, secret);
+    } catch (err) {
+      throw AppError.badRequest(
+        `Stripe signature verification failed: ${err instanceof Error ? err.message : 'Invalid signature'}`,
+      );
+    }
+
+    if (
+      event.type !== 'checkout.session.completed' &&
+      event.type !== 'payment_intent.succeeded'
+    ) {
+      return { processed: false, duplicate: false, tranId: event.id };
+    }
+
+    const sessionObj = event.data.object as {
+      id?: string;
+      metadata?: { tranId?: string };
+      client_reference_id?: string;
+    };
     const tranId =
-      body.tran_id ??
-      body.data?.object?.metadata?.tranId ??
-      body.data?.object?.client_reference_id ??
-      body.id ??
+      sessionObj.metadata?.tranId ??
+      sessionObj.client_reference_id ??
+      sessionObj.id ??
       '';
 
     if (!tranId) {
-      throw AppError.badRequest('Missing Stripe event reference or tran_id');
+      throw AppError.badRequest('Missing Stripe transaction identifier');
     }
 
-    const existing = await PaymentModel.findOne({ provider: 'stripe', eventId: tranId });
-    if (!existing) {
-      throw AppError.notFound('Stripe payment record not found');
+    const session = await mongoose.startSession();
+    let wasUpdated = false;
+
+    try {
+      await session.withTransaction(async () => {
+        const paymentUpdate = await PaymentModel.findOneAndUpdate(
+          {
+            provider: 'stripe',
+            eventId: tranId,
+            status: 'pending',
+          },
+          {
+            $set: {
+              status: 'paid',
+              raw: event,
+            },
+          },
+          { session, new: true },
+        );
+
+        if (!paymentUpdate) {
+          wasUpdated = false;
+          return;
+        }
+
+        wasUpdated = true;
+        const tenant = await TenantModel.findById(paymentUpdate.tenantId).session(session);
+        if (!tenant) {
+          throw AppError.notFound('Tenant not found for payment');
+        }
+
+        const baseDate =
+          tenant.plan === 'pro' &&
+          tenant.planExpiresAt &&
+          tenant.planExpiresAt.getTime() > Date.now()
+            ? tenant.planExpiresAt.getTime()
+            : Date.now();
+        const period = resolvePeriodFromPayment(paymentUpdate);
+        const newExpiresAt = new Date(baseDate + periodDaysMs(period));
+
+        await TenantModel.findByIdAndUpdate(
+          paymentUpdate.tenantId,
+          {
+            $set: { plan: 'pro', planExpiresAt: newExpiresAt, trialEndsAt: null },
+          },
+          { session },
+        );
+
+        await SubscriptionModel.findOneAndUpdate(
+          { tenantId: paymentUpdate.tenantId, provider: 'stripe' },
+          {
+            $set: {
+              plan: 'pro',
+              status: 'active',
+              currentPeriodEnd: newExpiresAt,
+              providerSubscriptionId: tranId,
+            },
+          },
+          { upsert: true, session },
+        );
+      });
+    } finally {
+      await session.endSession();
     }
 
-    if (existing.status === 'paid') {
-      return { processed: true, duplicate: true, tranId };
-    }
-
-    existing.status = 'paid';
-    await existing.save();
-
-    // Same stacking rule as SSLCommerz: paid time extends any active period
-    // (including a running trial) instead of resetting it.
-    const tenant = await TenantModel.findById(existing.tenantId);
-    const baseDate =
-      tenant?.plan === 'pro' &&
-      tenant.planExpiresAt &&
-      tenant.planExpiresAt.getTime() > Date.now()
-        ? tenant.planExpiresAt.getTime()
-        : Date.now();
-    const period = resolvePeriodFromPayment(existing);
-    const newExpiresAt = new Date(baseDate + periodDaysMs(period));
-    await TenantModel.findByIdAndUpdate(existing.tenantId, {
-      $set: { plan: 'pro', planExpiresAt: newExpiresAt, trialEndsAt: null },
-    });
-
-    await SubscriptionModel.findOneAndUpdate(
-      { tenantId: existing.tenantId, provider: 'stripe' },
-      {
-        $set: {
-          plan: 'pro',
-          status: 'active',
-          currentPeriodEnd: newExpiresAt,
-          providerSubscriptionId: tranId,
-        },
-      },
-      { upsert: true },
-    );
-
-    return { processed: true, duplicate: false, tranId };
+    return { processed: true, duplicate: !wasUpdated, tranId };
   }
 
   async getSubscription(tenantId: string): Promise<unknown> {
@@ -510,14 +556,57 @@ export const billingRouter = Router();
 
 const frontendBaseUrl = (): string => env.FRONTEND_URL.replace(/\/$/, '');
 
+const billingCallbackLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 60,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: {
+    error: {
+      code: ERROR_CODES.RATE_LIMITED,
+      message: 'Too many payment callback requests. Please try again later.',
+    },
+  },
+});
+
 async function handleSslCommerzSuccess(
   req: Request,
   res: import('express').Response,
   next: import('express').NextFunction,
 ): Promise<void> {
   try {
+    if (req.method === 'GET') {
+      const tranId = String(req.query.tran_id ?? '');
+      if (!tranId) {
+        throw AppError.badRequest('Missing tran_id parameter');
+      }
+      const payment = await PaymentModel.findOne({ provider: 'sslcommerz', eventId: tranId }).lean();
+      if (!payment) {
+        throw AppError.notFound(`Payment transaction '${tranId}' not found`);
+      }
+      if (req.headers.accept?.includes('application/json') || req.query.format === 'json') {
+        res.status(200).json({
+          data: {
+            tranId,
+            status: payment.status,
+            duplicate: payment.status === 'paid',
+          },
+        });
+        return;
+      }
+      // Pure read-only redirect to frontend billing view: no state mutation on GET
+      res.redirect(
+        `${frontendBaseUrl()}/app/billing?status=${payment.status === 'paid' ? 'success' : 'pending'}&tran_id=${encodeURIComponent(tranId)}`,
+      );
+      return;
+    }
+
     const result = await sslCommerzProvider.handleWebhook(req);
-    if (req.headers.accept?.includes('application/json') || req.query.format === 'json') {
+    if (
+      req.is('json') ||
+      req.headers.accept?.includes('application/json') ||
+      req.query.format === 'json'
+    ) {
       res.status(200).json({ data: result });
       return;
     }
@@ -536,12 +625,23 @@ async function handleSslCommerzFail(
 ): Promise<void> {
   try {
     const tranId = String((req.body as { tran_id?: string })?.tran_id ?? req.query.tran_id ?? '');
-    if (tranId) {
-      await PaymentModel.updateOne(
-        { provider: 'sslcommerz', eventId: tranId, status: 'pending' },
-        { $set: { status: 'failed' } },
-      );
+    if (!tranId) {
+      throw AppError.badRequest('Missing tran_id parameter');
     }
+    const payment = await PaymentModel.findOne({ provider: 'sslcommerz', eventId: tranId }).lean();
+    if (!payment) {
+      throw AppError.notFound(`Payment transaction '${tranId}' not found`);
+    }
+
+    if (req.method === 'POST') {
+      if (payment.status === 'pending') {
+        await PaymentModel.updateOne(
+          { provider: 'sslcommerz', eventId: tranId, status: 'pending' },
+          { $set: { status: 'failed', raw: req.body } },
+        );
+      }
+    }
+
     if (req.method === 'GET' && !req.headers.accept?.includes('application/json')) {
       res.redirect(
         `${frontendBaseUrl()}/app/billing?status=failed&tran_id=${encodeURIComponent(tranId)}`,
@@ -561,12 +661,23 @@ async function handleSslCommerzCancel(
 ): Promise<void> {
   try {
     const tranId = String((req.body as { tran_id?: string })?.tran_id ?? req.query.tran_id ?? '');
-    if (tranId) {
-      await PaymentModel.updateOne(
-        { provider: 'sslcommerz', eventId: tranId, status: 'pending' },
-        { $set: { status: 'failed' } },
-      );
+    if (!tranId) {
+      throw AppError.badRequest('Missing tran_id parameter');
     }
+    const payment = await PaymentModel.findOne({ provider: 'sslcommerz', eventId: tranId }).lean();
+    if (!payment) {
+      throw AppError.notFound(`Payment transaction '${tranId}' not found`);
+    }
+
+    if (req.method === 'POST') {
+      if (payment.status === 'pending') {
+        await PaymentModel.updateOne(
+          { provider: 'sslcommerz', eventId: tranId, status: 'pending' },
+          { $set: { status: 'failed', raw: req.body } },
+        );
+      }
+    }
+
     if (req.method === 'GET' && !req.headers.accept?.includes('application/json')) {
       res.redirect(
         `${frontendBaseUrl()}/app/billing?status=cancelled&tran_id=${encodeURIComponent(tranId)}`,
@@ -577,6 +688,12 @@ async function handleSslCommerzCancel(
   } catch (err) {
     next(err);
   }
+}
+
+// Rate limiting on public gateway callback routes outside test environment
+if (env.NODE_ENV !== 'test') {
+  billingRouter.use('/sslcommerz', billingCallbackLimiter);
+  billingRouter.use('/stripe', billingCallbackLimiter);
 }
 
 // Public SSLCommerz callbacks & IPN (registered BEFORE requireAuth/requireTenant for both GET and POST)
@@ -696,9 +813,9 @@ billingRouter.post(
   },
 );
 
-// POST /api/v1/billing/stripe/checkout
+// POST /api/v1/billing/stripe/checkout or /stripe/init
 billingRouter.post(
-  '/stripe/checkout',
+  ['/stripe/checkout', '/stripe/init'],
   requirePermission('billing:write'),
   async (req, res, next) => {
     try {

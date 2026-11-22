@@ -620,7 +620,7 @@ export function LandingPage(): React.ReactElement {
                 </div>
                 <p className="text-xs text-[#57534E] leading-relaxed">
                   Start billing customers at the counter, log Baki instantly, and collect payments
-                  via bKash QR, Nagad or cash without discrepancies.
+                  via mobile banking or cash without discrepancies.
                 </p>
               </div>
             </div>

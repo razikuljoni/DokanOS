@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  AlertTriangle,
   ArrowUpRight,
   Bell,
   CheckCheck,
@@ -876,19 +875,6 @@ export function BillingPage(): React.ReactElement {
     },
   });
 
-  const bkashStubMutation = useMutation({
-    mutationFn: async () => {
-      return apiFetch('/api/v1/billing/bkash/init', { method: 'POST' });
-    },
-    onError: (err) => {
-      addToast({
-        title: 'bKash Tokenized Stub (501 NOT_CONFIGURED)',
-        description: err instanceof Error ? err.message : 'bKash stub invoked',
-        variant: 'warning',
-      });
-    },
-  });
-
   const billing = data?.data;
 
   const paymentColumns: DataTableColumn<BillingPlanResponse['payments'][number]>[] = [
@@ -1125,15 +1111,10 @@ export function BillingPage(): React.ReactElement {
               </Button>
 
               <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-xs text-muted-foreground"
-                  onClick={() => bkashStubMutation.mutate()}
-                >
-                  <AlertTriangle className="h-3.5 w-3.5" />
-                  Test bKash Tokenized Seam (501 Stub)
-                </Button>
+                <div className="text-xs text-muted-foreground flex items-center gap-1.5 py-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                  <span>bKash Direct: Pending merchant onboarding</span>
+                </div>
 
                 {billing?.plan === 'pro' && (
                   <Button

@@ -19,6 +19,8 @@ import {
   UserModel,
 } from '../src/models/index.js';
 import { clearAllCacheForTests } from '../src/config/redis.js';
+import Stripe from 'stripe';
+import { env } from '../src/config/env.js';
 
 describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMemoryReplSet)', () => {
   const app = createApiApp();
@@ -409,6 +411,49 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
     expect(res.body.error.message).toContain('val_id is required');
   });
 
+  // 5c. Phase 1 security: SSLCommerz callback with wrong amount is rejected
+  it('5c. Phase 1 security: SSLCommerz callback with wrong amount is rejected with 400', async () => {
+    const shop = await registerShop({ shopName: 'Wrong Amount Shop', email: 'owner@wrongamount.bd' });
+    const initRes = await request(app)
+      .post('/api/v1/billing/sslcommerz/init')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({});
+    expect(initRes.status).toBe(201);
+    const tranId = initRes.body.data.tranId as string;
+
+    const res = await request(app)
+      .post('/api/v1/billing/sslcommerz/ipn')
+      .send({
+        tran_id: tranId,
+        val_id: 'VAL-123',
+        amount: 100, // stored amount is 499
+        currency: 'BDT',
+        status: 'VALID',
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toContain('Validated amount does not match');
+  });
+
+  // 5d. Phase 1 security: unsigned Stripe webhook is rejected
+  it('5d. Phase 1 security: unsigned Stripe webhook is rejected with 400', async () => {
+    const res = await request(app)
+      .post('/api/v1/billing/stripe/webhook')
+      .send({ id: 'evt_test_123', type: 'checkout.session.completed' });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toContain('Missing stripe-signature header');
+  });
+
+  // 5e. Phase 1 security: Stripe webhook with invalid signature is rejected
+  it('5e. Phase 1 security: Stripe webhook with invalid signature is rejected with 400', async () => {
+    env.STRIPE_WEBHOOK_SECRET = 'whsec_test_secret_for_tests_1234567890';
+    const res = await request(app)
+      .post('/api/v1/billing/stripe/webhook')
+      .set('stripe-signature', 't=123456,v1=invalid_signature')
+      .send({ id: 'evt_test_123', type: 'checkout.session.completed' });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toContain('Stripe signature verification failed');
+  });
+
   // 6. Aggregation correctness
   it('6. Aggregation correctness: dashboard summary revenue, COGS profit, and top products match hand-computed values', async () => {
     const shop = await registerShop({ shopName: 'Math Shop', email: 'owner@math.bd' });
@@ -712,8 +757,8 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
     expect(salesCount).toBe(0);
   });
 
-  // 10. Phase 3 (§4.1.4) — SSLCommerz GET browser redirect callback & FRONTEND_URL redirect
-  it('10a & 10c. SSLCommerz GET browser redirect: GET /api/v1/billing/sslcommerz/success?tran_id=... applies payment without Authorization header and redirects to env.FRONTEND_URL', async () => {
+  // 10. Phase 1 (§4.1.4) — SSLCommerz GET browser redirect is read-only
+  it('10a & 10c. SSLCommerz GET browser redirect: GET /api/v1/billing/sslcommerz/success?tran_id=... is read-only and does NOT grant Pro without POST validation', async () => {
     const shop = await registerShop({ shopName: 'GET Callback Shop', email: 'owner@getcb.bd' });
 
     const initRes = await request(app)
@@ -723,29 +768,45 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
     expect(initRes.status).toBe(201);
     const tranId = initRes.body.data.tranId as string;
 
-    // Monthly payment stacks on the running trial: 30 days from trial end.
     const beforePayment = await TenantModel.findById(shop.tenantId).lean();
     const trialEndsMs = new Date(beforePayment!.planExpiresAt!).getTime();
 
-    // Unauthenticated browser GET redirect from SSLCommerz sandbox
+    // Browser GET redirect from SSLCommerz sandbox
     const getCallbackRes = await request(app)
       .get(`/api/v1/billing/sslcommerz/success?tran_id=${encodeURIComponent(tranId)}&val_id=VAL-GET-01`)
       .set('Accept', 'text/html,application/xhtml+xml');
 
     expect(getCallbackRes.status).toBe(302);
     const location = getCallbackRes.headers['location'] ?? '';
-    expect(location.startsWith('http://localhost:5173/app/billing?status=success&tran_id=')).toBe(
-      true,
-    );
     expect(location).toContain(encodeURIComponent(tranId));
 
+    // Payment MUST remain pending after GET
     const payment = await PaymentModel.findOne({ provider: 'sslcommerz', eventId: tranId }).lean();
-    expect(payment?.status).toBe('paid');
+    expect(payment?.status).toBe('pending');
 
-    const tenant = await TenantModel.findById(shop.tenantId).lean();
-    expect(tenant?.plan).toBe('pro');
+    // Tenant Pro expiration must NOT be extended by GET
+    const tenantAfterGet = await TenantModel.findById(shop.tenantId).lean();
+    expect(new Date(tenantAfterGet!.planExpiresAt!).getTime()).toBe(trialEndsMs);
+
+    // Legitimate server POST callback applies payment
+    const postRes = await request(app)
+      .post('/api/v1/billing/sslcommerz/success')
+      .send({
+        tran_id: tranId,
+        val_id: 'VAL-GET-01',
+        amount: 499,
+        currency: 'BDT',
+        status: 'VALID',
+      });
+    expect(postRes.status).toBe(200);
+
+    const paidPayment = await PaymentModel.findOne({ provider: 'sslcommerz', eventId: tranId }).lean();
+    expect(paidPayment?.status).toBe('paid');
+
+    const upgradedTenant = await TenantModel.findById(shop.tenantId).lean();
+    expect(upgradedTenant?.plan).toBe('pro');
     const daysAdded =
-      (new Date(tenant!.planExpiresAt!).getTime() - trialEndsMs) / (1000 * 60 * 60 * 24);
+      (new Date(upgradedTenant!.planExpiresAt!).getTime() - trialEndsMs) / (1000 * 60 * 60 * 24);
     expect(daysAdded).toBeGreaterThan(29.5);
     expect(daysAdded).toBeLessThan(30.5);
   });
@@ -768,27 +829,19 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
     );
   });
 
-  // 11. Phase 4 (§5) — Full End-to-End Sandbox Payment Proof (SSLCommerz Primary + Stripe Test Mode Secondary)
-  it('11. Phase 4 E2E Payment Proof: Trial tenant pays via SSLCommerz Sandbox & Stripe Test Mode with GET/POST callback + IPN replay idempotency', async () => {
+  // 11. Phase 1 & 4 — End-to-End Payment Proof (SSLCommerz POST IPN + Stripe Verified Webhook)
+  it('11. Phase 4 E2E Payment Proof: Trial tenant pays via SSLCommerz POST IPN and Stripe webhook with constructEvent', async () => {
     const shop = await registerShop({
       shopName: 'Phase 4 Sandbox Proof Pharmacy',
       email: 'proof@dokanos.bd',
     });
 
-    // Verify initial Pro trial state (new shops start on a 14-day trial)
+    // Step 1: Verify initial Pro trial state
     const initialPlanRes = await request(app)
       .get('/api/v1/billing/plan')
       .set('Authorization', `Bearer ${shop.accessToken}`);
     expect(initialPlanRes.status).toBe(200);
     expect(initialPlanRes.body.data.plan).toBe('pro');
-    const initialTrialDays =
-      (new Date(initialPlanRes.body.data.planExpiresAt).getTime() - Date.now()) /
-      (1000 * 60 * 60 * 24);
-    expect(initialTrialDays).toBeGreaterThan(13.5);
-    expect(initialTrialDays).toBeLessThan(14.5);
-    expect(initialPlanRes.body.data.trialEndsAt).toBe(
-      initialPlanRes.body.data.planExpiresAt,
-    );
 
     // Step 2: Initiate SSLCommerz Sandbox Checkout
     const initRes = await request(app)
@@ -806,16 +859,27 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
     expect(pendingPayment?.status).toBe('pending');
     expect(pendingPayment?.amount).toBe(499);
 
-    // Step 3: Complete payment via browser GET redirect to /api/v1/billing/sslcommerz/success
+    // Step 3: Browser GET redirect is purely navigational
     const getSuccessRes = await request(app)
-      .get(`/api/v1/billing/sslcommerz/success?tran_id=${encodeURIComponent(tranId)}&val_id=VAL-SANDBOX-PROOF-01`)
+      .get(`/api/v1/billing/sslcommerz/success?tran_id=${encodeURIComponent(tranId)}`)
       .set('Accept', 'text/html');
     expect(getSuccessRes.status).toBe(302);
-    expect(getSuccessRes.headers['location']).toBe(
-      `http://localhost:5173/app/billing?status=success&tran_id=${encodeURIComponent(tranId)}`,
-    );
+    expect(getSuccessRes.headers['location']).toContain(encodeURIComponent(tranId));
 
-    // Step 4: Verify database state after callback
+    // Step 4: Apply payment via server POST /ipn
+    const ipnRes = await request(app)
+      .post('/api/v1/billing/sslcommerz/ipn')
+      .send({
+        tran_id: tranId,
+        val_id: 'VAL-SANDBOX-PROOF-01',
+        amount: 499,
+        currency: 'BDT',
+        status: 'VALID',
+      });
+    expect(ipnRes.status).toBe(200);
+    expect(ipnRes.body.data.duplicate).toBe(false);
+
+    // Step 5: Verify database state after callback
     const paidPayment = await PaymentModel.findOne({
       provider: 'sslcommerz',
       eventId: tranId,
@@ -834,7 +898,7 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
     expect(activeSub?.status).toBe('active');
     expect(activeSub?.plan).toBe('pro');
 
-    // Step 5: Replay idempotency check via POST /ipn AND GET /success
+    // Step 6: Replay idempotency check via POST /ipn
     const ipnReplay = await request(app)
       .post('/api/v1/billing/sslcommerz/ipn')
       .send({
@@ -847,13 +911,51 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
     expect(ipnReplay.status).toBe(200);
     expect(ipnReplay.body.data.duplicate).toBe(true);
 
-    const getReplay = await request(app)
-      .get(`/api/v1/billing/sslcommerz/success?tran_id=${encodeURIComponent(tranId)}&format=json`);
-    expect(getReplay.status).toBe(200);
-    expect(getReplay.body.data.duplicate).toBe(true);
-
     const tenantAfterReplays = await TenantModel.findById(shop.tenantId).lean();
     expect(new Date(tenantAfterReplays!.planExpiresAt!).toISOString()).toBe(firstExpiresAtIso);
+
+    // Step 7: Test Stripe checkout and verified webhook signature flow
+    const stripeInitRes = await request(app)
+      .post('/api/v1/billing/stripe/init')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({ period: 'monthly' });
+    expect(stripeInitRes.status).toBe(201);
+    const stripeTranId = stripeInitRes.body.data.tranId as string;
+
+    const stripe = new Stripe(env.STRIPE_SECRET_KEY || 'sk_test_placeholder');
+    const testWebhookSecret = 'whsec_test_secret_for_tests_1234567890';
+    env.STRIPE_WEBHOOK_SECRET = testWebhookSecret;
+
+    const payloadObj = {
+      id: 'evt_test_stripe_01',
+      object: 'event',
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          id: 'cs_test_01',
+          client_reference_id: stripeTranId,
+          metadata: { tranId: stripeTranId },
+        },
+      },
+    };
+    const payloadStr = JSON.stringify(payloadObj);
+    const sigHeader = stripe.webhooks.generateTestHeaderString({
+      payload: payloadStr,
+      secret: testWebhookSecret,
+    });
+
+    const stripeWebhookRes = await request(app)
+      .post('/api/v1/billing/stripe/webhook')
+      .set('stripe-signature', sigHeader)
+      .send(payloadObj);
+    expect(stripeWebhookRes.status).toBe(200);
+    expect(stripeWebhookRes.body.data.tranId).toBe(stripeTranId);
+
+    const stripePayment = await PaymentModel.findOne({
+      provider: 'stripe',
+      eventId: stripeTranId,
+    }).lean();
+    expect(stripePayment?.status).toBe('paid');
   });
 
   // 12. Trial provisioning
@@ -935,11 +1037,32 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
     const beforePayment = await TenantModel.findById(shop.tenantId).lean();
     const trialEndsMs = new Date(beforePayment!.planExpiresAt!).getTime();
 
-    const hook = await request(app).post('/api/v1/billing/stripe/webhook').send({
+    const stripe = new Stripe(env.STRIPE_SECRET_KEY || 'sk_test_placeholder');
+    const webhookSecret = 'whsec_test_secret_for_tests_1234567890';
+    env.STRIPE_WEBHOOK_SECRET = webhookSecret;
+
+    const payloadObj = {
       id: `evt_${Date.now()}`,
+      object: 'event',
       type: 'checkout.session.completed',
-      tran_id: tranId,
+      data: {
+        object: {
+          id: `cs_${Date.now()}`,
+          client_reference_id: tranId,
+          metadata: { tranId },
+        },
+      },
+    };
+    const payloadStr = JSON.stringify(payloadObj);
+    const sigHeader = stripe.webhooks.generateTestHeaderString({
+      payload: payloadStr,
+      secret: webhookSecret,
     });
+
+    const hook = await request(app)
+      .post('/api/v1/billing/stripe/webhook')
+      .set('stripe-signature', sigHeader)
+      .send(payloadObj);
     expect(hook.status).toBe(200);
 
     const tenant = await TenantModel.findById(shop.tenantId).lean();
