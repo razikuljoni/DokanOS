@@ -11,7 +11,7 @@ import {
   YAxis,
 } from 'recharts';
 import { Banknote, CloudOff, Database, Download, Search, X } from 'lucide-react';
-import { PAYMENT_METHODS, type PaymentMethod } from '@dokanos/shared';
+import { PAYMENT_METHODS, type PaymentMethod, type PaginationMeta } from '@dokanos/shared';
 import { useAuthStore } from '@/stores/authStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useIsOffline, useOfflineStore } from '@/stores/offlineStore';
@@ -69,6 +69,7 @@ export function DuesPage(): React.ReactElement {
   const [partyFilter, setPartyFilter] = useState<'all' | 'customer' | 'supplier'>('all');
   const [bucketFilter, setBucketFilter] = useState<'all' | '0-7' | '8-30' | '30+'>('all');
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
   const [paymentTarget, setPaymentTarget] = useState<UnifiedDueItem | null>(null);
   const [paymentAmount, setPaymentAmount] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
@@ -117,15 +118,25 @@ export function DuesPage(): React.ReactElement {
     queryKey: [
       'dues',
       tenant?.id,
-      { partyFilter, bucketFilter, search, mode: isOffline ? 'offline' : 'online' },
+      { partyFilter, bucketFilter, search, page, mode: isOffline ? 'offline' : 'online' },
     ],
-    queryFn: async (): Promise<{ data: UnifiedDueItem[]; fromCache?: boolean }> => {
+    queryFn: async (): Promise<{
+      data: UnifiedDueItem[];
+      meta?: PaginationMeta;
+      fromCache?: boolean;
+    }> => {
       if (!tenant?.id) return { data: [] };
 
       if (isOffline) {
         const snap = await getTenantSnapshot<UnifiedDueItem[]>(tenant.id, 'dues-list');
+        const filtered = filterCachedDues(snap?.data ?? [], partyFilter, bucketFilter, search);
+        const limit = 20;
+        const total = filtered.length;
+        const totalPages = Math.max(1, Math.ceil(total / limit));
+        const paginated = filtered.slice((page - 1) * limit, page * limit);
         return {
-          data: filterCachedDues(snap?.data ?? [], partyFilter, bucketFilter, search),
+          data: paginated,
+          meta: { page, limit, total, totalPages },
           fromCache: true,
         };
       }
@@ -135,22 +146,37 @@ export function DuesPage(): React.ReactElement {
         if (partyFilter !== 'all') params.set('partyType', partyFilter);
         if (bucketFilter !== 'all') params.set('bucket', bucketFilter);
         if (search.trim()) params.set('search', search.trim());
-        const res = await apiFetch<{ data: UnifiedDueItem[] }>(
+        params.set('page', String(page));
+        params.set('limit', '20');
+
+        const res = await apiFetch<{ data: UnifiedDueItem[]; meta?: PaginationMeta }>(
           `/api/v1/dues?${params.toString()}`,
         );
 
-        // When loading unfiltered ledger, persist full snapshot to IndexedDB for offline access
-        if (partyFilter === 'all' && bucketFilter === 'all' && !search.trim()) {
-          await saveTenantSnapshot(tenant.id, 'dues-list', res.data);
-          await refreshOfflineState(tenant.id);
+        // When loading first page of unfiltered ledger, cache full snapshot for offline access
+        if (partyFilter === 'all' && bucketFilter === 'all' && !search.trim() && page === 1) {
+          void apiFetch<{ data: UnifiedDueItem[] }>('/api/v1/dues?limit=100')
+            .then(async (allDues) => {
+              if (tenant?.id && allDues?.data) {
+                await saveTenantSnapshot(tenant.id, 'dues-list', allDues.data);
+                await refreshOfflineState(tenant.id);
+              }
+            })
+            .catch(() => {});
         }
-        return { data: res.data, fromCache: false };
+        return { data: res.data, meta: res.meta, fromCache: false };
       } catch (err) {
         if (!(err instanceof ApiClientError)) {
           const snap = await getTenantSnapshot<UnifiedDueItem[]>(tenant.id, 'dues-list');
           if (snap) {
+            const filtered = filterCachedDues(snap.data, partyFilter, bucketFilter, search);
+            const limit = 20;
+            const total = filtered.length;
+            const totalPages = Math.max(1, Math.ceil(total / limit));
+            const paginated = filtered.slice((page - 1) * limit, page * limit);
             return {
-              data: filterCachedDues(snap.data, partyFilter, bucketFilter, search),
+              data: paginated,
+              meta: { page, limit, total, totalPages },
               fromCache: true,
             };
           }
@@ -530,7 +556,10 @@ export function DuesPage(): React.ReactElement {
           <Search className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
           <Input
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
             placeholder="Search by customer, supplier, phone, or invoice..."
             className="pl-9 h-9 text-xs"
           />
@@ -548,7 +577,10 @@ export function DuesPage(): React.ReactElement {
               <button
                 key={p.id}
                 type="button"
-                onClick={() => setPartyFilter(p.id)}
+                onClick={() => {
+                  setPartyFilter(p.id);
+                  setPage(1);
+                }}
                 className={`px-3 py-1.5 text-xs font-medium rounded transition-colors cursor-pointer ${
                   partyFilter === p.id
                     ? 'bg-card text-foreground shadow-xs'
@@ -565,7 +597,10 @@ export function DuesPage(): React.ReactElement {
               <button
                 key={b}
                 type="button"
-                onClick={() => setBucketFilter(b)}
+                onClick={() => {
+                  setBucketFilter(b);
+                  setPage(1);
+                }}
                 className={`px-2.5 py-1.5 text-xs font-mono rounded transition-colors cursor-pointer ${
                   bucketFilter === b
                     ? 'bg-card text-foreground shadow-xs'
@@ -586,6 +621,8 @@ export function DuesPage(): React.ReactElement {
         loading={duesLoading}
         emptyTitle="No open Baki dues — nice."
         emptyDescription="All customer credit bills and supplier purchase orders are settled."
+        meta={duesRes?.meta}
+        onPageChange={setPage}
       />
 
       {/* DuePaymentDialog */}

@@ -59,6 +59,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Added root `.dockerignore` and `apps/api/.dockerignore` to streamline container builds.
 - Hardened CI/CD workflows: deploy workflow gracefully handles unset secrets; added automated Atlas M0 snapshot workflow (`.github/workflows/backup.yml`).
 
+### PR #22 Review Hardening (Codex Recommendations)
+- Stripe Async Checkout: Gated Pro plan activation on `payment_status: 'paid'`; added handlers for `checkout.session.async_payment_succeeded` and `checkout.session.async_payment_failed`.
+- Customer Balance Due: Fixed `POST /api/v1/dues/:refId/payments` to decrement `CustomerModel.balanceDue` when payments are recorded for customer sales.
+- Notification De-duplication: Added 24-hour deduplication guard for subscription expiry reminders, low-stock digests, and due reminders; separated daily digest cadence from hourly payment reconciliation.
+- Dues Ledger Pagination: Added pagination (`page`, `limit=20`) and total count controls to `DuesPage.tsx` with offline cache fallback.
+
 ---
 
 ## [1.0.0] - 2026-10-30

@@ -64,7 +64,7 @@ Always run local validation commands before committing. Our CI pipeline expects 
 
 ### Integration & Isolation Tests (Vitest)
 
-Runs our 46 tenant isolation, security, billing, customer, and stock concurrency tests on an in-memory database replica:
+Runs our 48 tenant isolation, security, billing, customer, and stock concurrency tests on an in-memory database replica:
 
 ```bash
 pnpm --filter api test

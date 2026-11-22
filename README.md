@@ -47,7 +47,7 @@ DokanOS solves the three hardest operational problems for a single-counter or mu
 | **Backend** | Node.js 22, Express 5, Mongoose 9, Socket.io, Structured JSON Logging, Helmet, `express-rate-limit` | Native async error propagation in Express 5, replica-set transactions, and tenant-scoped realtime rooms. |
 | **Database & Cache** | MongoDB Atlas M0 (512 MB replica set), Upstash Redis (free tier), In-process BullMQ / Cron | Multi-document ACID transactions on M0 and serverless Redis for cache-aside + scheduled jobs. |
 | **Payments & Email** | SSLCommerz Sandbox (BDT primary), Stripe Test Mode (secondary), Resend Free Sandbox | Bangladeshi merchant checkout + test card support with webhook signature verification. |
-| **Testing & CI/CD** | Vitest, Supertest, `mongodb-memory-server` (`MongoMemoryReplSet`), Playwright, GitHub Actions | 46 passing integration and isolation tests in CI without external database dependencies. |
+| **Testing & CI/CD** | Vitest, Supertest, `mongodb-memory-server` (`MongoMemoryReplSet`), Playwright, GitHub Actions | 48 passing integration and isolation tests in CI without external database dependencies. |
 
 ---
 

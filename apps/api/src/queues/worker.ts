@@ -122,27 +122,37 @@ export async function executeJobForTenant(
       }).lean();
 
       if (lowStockProducts.length > 0) {
-        const notif = await NotificationModel.create({
+        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const existingDigest = await NotificationModel.findOne({
           tenantId: tenantObjectId,
-          userId: null,
           type: 'low_stock',
-          title: `Daily Low-Stock Digest (${lowStockProducts.length} items)`,
-          body: `Items needing restock: ${lowStockProducts
-            .slice(0, 4)
-            .map((p) => `${p.name} (${p.stock})`)
-            .join(', ')}.`,
-          link: '/app/products?stockStatus=low',
-          isRead: false,
-        });
-        emitToTenant(tenantId, 'notification:new', notif);
+          title: { $regex: /Daily Low-Stock Digest/i },
+          createdAt: { $gte: twentyFourHoursAgo },
+        }).lean();
 
-        // H2 fix: strictly gate on effectivePlan, never stored plan alone
-        if (effectivePlan === 'pro' && owner?.email) {
-          await sendDigestEmail({
-            to: owner.email,
-            subject: `[DokanOS] Low Stock Digest for ${tenant.name}`,
-            html: `<p>${lowStockProducts.length} items are at or below threshold.</p>`,
+        if (!existingDigest) {
+          const notif = await NotificationModel.create({
+            tenantId: tenantObjectId,
+            userId: null,
+            type: 'low_stock',
+            title: `Daily Low-Stock Digest (${lowStockProducts.length} items)`,
+            body: `Items needing restock: ${lowStockProducts
+              .slice(0, 4)
+              .map((p) => `${p.name} (${p.stock})`)
+              .join(', ')}.`,
+            link: '/app/products?stockStatus=low',
+            isRead: false,
           });
+          emitToTenant(tenantId, 'notification:new', notif);
+
+          // H2 fix: strictly gate on effectivePlan, never stored plan alone
+          if (effectivePlan === 'pro' && owner?.email) {
+            await sendDigestEmail({
+              to: owner.email,
+              subject: `[DokanOS] Low Stock Digest for ${tenant.name}`,
+              html: `<p>${lowStockProducts.length} items are at or below threshold.</p>`,
+            });
+          }
         }
       }
 
@@ -166,16 +176,25 @@ export async function executeJobForTenant(
 
       const totalAged = agedSales + agedPurchases;
       if (totalAged > 0) {
-        const notif = await NotificationModel.create({
+        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const existingReminder = await NotificationModel.findOne({
           tenantId: tenantObjectId,
-          userId: null,
           type: 'due_reminder',
-          title: `Baki Due Reminder: ${totalAged} aged account(s)`,
-          body: `You have ${agedSales} customer receivable(s) and ${agedPurchases} supplier payable(s) aged 7+ days.`,
-          link: '/app/dues',
-          isRead: false,
-        });
-        emitToTenant(tenantId, 'notification:new', notif);
+          createdAt: { $gte: twentyFourHoursAgo },
+        }).lean();
+
+        if (!existingReminder) {
+          const notif = await NotificationModel.create({
+            tenantId: tenantObjectId,
+            userId: null,
+            type: 'due_reminder',
+            title: `Baki Due Reminder: ${totalAged} aged account(s)`,
+            body: `You have ${agedSales} customer receivable(s) and ${agedPurchases} supplier payable(s) aged 7+ days.`,
+            link: '/app/dues',
+            isRead: false,
+          });
+          emitToTenant(tenantId, 'notification:new', notif);
+        }
       }
 
       summary = `Identified ${totalAged} due entry/entries aged 7+ days for ${tenant.name}`;
@@ -221,31 +240,43 @@ export async function executeJobForTenant(
 
           summary = `Downgraded ${tenant.name} to free plan (trial/subscription expired)`;
         } else if (daysRemaining <= 3) {
-          // Expiring within 3 days: send renewal reminder
-          const notif = await NotificationModel.create({
+          // Expiring within 3 days: send renewal reminder (at most once every 24h per shop)
+          const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+          const existingReminder = await NotificationModel.findOne({
             tenantId: tenantObjectId,
-            userId: null,
             type: 'subscription',
-            title: `DokanOS Pro Expiring in ${daysRemaining} day${daysRemaining === 1 ? '' : 's'}`,
-            body: `Your Pro plan will expire on ${new Date(tenant.planExpiresAt).toISOString().slice(0, 10)}. Extend now to keep uninterrupted Pro features.`,
-            link: '/app/billing',
-            isRead: false,
-          });
-          emitToTenant(tenantId, 'notification:new', notif);
+            title: { $regex: /Pro Expiring/i },
+            createdAt: { $gte: twentyFourHoursAgo },
+          }).lean();
 
-          if (owner?.email) {
-            await sendResendEmail({
-              to: owner.email,
-              subject: `[DokanOS] Pro plan expiring in ${daysRemaining} day(s) for ${tenant.name}`,
-              html: `
-                <h2>Pro Subscription Renewal Reminder</h2>
-                <p>Your shop <strong>${tenant.name}</strong> Pro plan expires on <strong>${new Date(tenant.planExpiresAt).toISOString().slice(0, 10)}</strong> (${daysRemaining} day(s) left).</p>
-                <p>Renew anytime in your Billing Portal to prevent interruption.</p>
-              `,
+          if (!existingReminder) {
+            const notif = await NotificationModel.create({
+              tenantId: tenantObjectId,
+              userId: null,
+              type: 'subscription',
+              title: `DokanOS Pro Expiring in ${daysRemaining} day${daysRemaining === 1 ? '' : 's'}`,
+              body: `Your Pro plan will expire on ${new Date(tenant.planExpiresAt).toISOString().slice(0, 10)}. Extend now to keep uninterrupted Pro features.`,
+              link: '/app/billing',
+              isRead: false,
             });
-          }
+            emitToTenant(tenantId, 'notification:new', notif);
 
-          summary = `Sent expiry reminder to ${tenant.name} (${daysRemaining} day(s) remaining)`;
+            if (owner?.email) {
+              await sendResendEmail({
+                to: owner.email,
+                subject: `[DokanOS] Pro plan expiring in ${daysRemaining} day(s) for ${tenant.name}`,
+                html: `
+                  <h2>Pro Subscription Renewal Reminder</h2>
+                  <p>Your shop <strong>${tenant.name}</strong> Pro plan expires on <strong>${new Date(tenant.planExpiresAt).toISOString().slice(0, 10)}</strong> (${daysRemaining} day(s) left).</p>
+                  <p>Renew anytime in your Billing Portal to prevent interruption.</p>
+                `,
+              });
+            }
+
+            summary = `Sent expiry reminder to ${tenant.name} (${daysRemaining} day(s) remaining)`;
+          } else {
+            summary = `Expiry reminder already sent within 24h for ${tenant.name}`;
+          }
         } else {
           summary = `Pro active for ${tenant.name} until ${new Date(tenant.planExpiresAt).toISOString().slice(0, 10)}`;
         }
@@ -330,14 +361,22 @@ export function initInProcessJobsWorker(): void {
     logger.warn('Initial boot payment reconciliation failed', { error: String(err) });
   });
 
-  // Run periodic schedule every hour while server is active
+  // Run periodic schedule: payment reconciliation runs hourly, daily digests run daily
   if (!schedulerTimer && env.NODE_ENV !== 'test') {
+    let lastDailyRun = 0;
     schedulerTimer = setInterval(async () => {
       try {
         await reconcilePendingPayments();
-        await runJobForAllTenants('subscription-expiry', 'scheduler');
-        await runJobForAllTenants('due-reminders', 'scheduler');
-        await runJobForAllTenants('low-stock-digest', 'scheduler');
+        const now = Date.now();
+        if (now - lastDailyRun >= 24 * 60 * 60 * 1000) {
+          lastDailyRun = now;
+          await runJobForAllTenants('subscription-expiry', 'scheduler');
+          await runJobForAllTenants('due-reminders', 'scheduler');
+          await runJobForAllTenants('low-stock-digest', 'scheduler');
+        } else {
+          // Run subscription-expiry hourly for instant downgrade of expired plans
+          await runJobForAllTenants('subscription-expiry', 'scheduler');
+        }
       } catch (err) {
         logger.error('Scheduled in-process job worker error', { error: String(err) });
       }

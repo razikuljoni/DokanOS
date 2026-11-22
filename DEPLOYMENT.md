@@ -7,7 +7,7 @@ This guide walks through deploying **DokanOS** end-to-end on **100% free tiers**
 ## Pre-Flight Release Checklist (Phase 6 Verification)
 
 - [x] **Lockfile & Package Manager:** Single `pnpm-lock.yaml` at repo root (`packageManager: "pnpm@10.34.5"`), no `bun.lock` or `package-lock.json`; `pnpm install --frozen-lockfile` succeeds.
-- [x] **Static Checks & Tests:** `pnpm lint`, `pnpm typecheck`, `pnpm --filter api test` (46 passing tests), and `pnpm build` all pass with zero errors.
+- [x] **Static Checks & Tests:** `pnpm lint`, `pnpm typecheck`, `pnpm --filter api test` (48 passing tests), and `pnpm build` all pass with zero errors.
 - [x] **Multi-Tenant Isolation:** All authenticated business queries (sales, products, dues, purchases, customers, suppliers) and IndexedDB cache keys are strictly scoped by `tenantId`; spoofed `X-Tenant-Id` headers return `403 TENANT_MISMATCH`. (Public payment webhooks look up by transaction ID `tranId` then resolve tenant context safely).
 - [x] **Auth Security:** `15m` JWT access tokens live in memory only (never `localStorage`/`sessionStorage`); `30d` refresh tokens are stored as `SHA-256` hashes in MongoDB and rotated via `httpOnly` cookie `dokanos_rt` with family reuse detection.
 - [x] **Atomic Stock & Money Transactions:** POS sales, sale returns, purchase orders, and Baki due payments run inside MongoDB replica-set transactions with `$gte` stock guards.

@@ -725,6 +725,13 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
     // Remaining due must be 280 - 100 = 180 (not 80)
     const updatedSale = await SaleModel.findById(saleId).lean();
     expect(updatedSale?.dueAmount).toBe(180);
+
+    // Customer balanceDue must also be decremented from 280 to 180
+    const updatedCustomer = await CustomerModel.findOne({
+      tenantId: shop.tenantId,
+      name: 'Rahima Begum',
+    }).lean();
+    expect(updatedCustomer?.balanceDue).toBe(180);
   });
 
   it('9c. Offline sync conflict: a queued offline sale that fails server validation (stock=0) returns 409 INSUFFICIENT_STOCK and does not corrupt stock', async () => {
@@ -942,6 +949,7 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
           id: 'cs_test_01',
           client_reference_id: stripeTranId,
           metadata: { tranId: stripeTranId },
+          payment_status: 'paid',
         },
       },
     };
@@ -1057,6 +1065,7 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
           id: `cs_${Date.now()}`,
           client_reference_id: tranId,
           metadata: { tranId },
+          payment_status: 'paid',
         },
       },
     };
@@ -1976,5 +1985,115 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
       .get('/health')
       .set('Origin', 'https://malicious-phishing-site.com');
     expect(corsRes.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  // 37. Codex Review Fix — Stripe Delayed Payments & Async Confirmation
+  it('37. Stripe Async Fulfillment: delayed unpaid sessions do not grant Pro until async_payment_succeeded; async_payment_failed marks failure', async () => {
+    const shop = await registerShop({ shopName: 'Stripe Async Shop', email: 'stripeasync@dokanos.bd' });
+
+    // Initialize Stripe checkout
+    const initRes = await request(app)
+      .post('/api/v1/billing/stripe/init')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({ plan: 'pro_monthly' });
+    expect(initRes.status).toBe(201);
+    const tranId = initRes.body.data.tranId as string;
+
+    const stripe = new Stripe(env.STRIPE_SECRET_KEY || 'sk_test_placeholder');
+    const webhookSecret = 'whsec_test_secret_for_tests_1234567890';
+    env.STRIPE_WEBHOOK_SECRET = webhookSecret;
+
+    // 1. Session completed with payment_status: 'unpaid' (e.g. delayed ACH / SEPA)
+    const unpaidPayload = {
+      id: `evt_unpaid_${Date.now()}`,
+      object: 'event',
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          id: `cs_${Date.now()}`,
+          client_reference_id: tranId,
+          metadata: { tranId },
+          payment_status: 'unpaid',
+        },
+      },
+    };
+    const unpaidSig = stripe.webhooks.generateTestHeaderString({
+      payload: JSON.stringify(unpaidPayload),
+      secret: webhookSecret,
+    });
+
+    const unpaidRes = await request(app)
+      .post('/api/v1/billing/stripe/webhook')
+      .set('stripe-signature', unpaidSig)
+      .send(unpaidPayload);
+    expect(unpaidRes.status).toBe(200);
+    expect(unpaidRes.body.data.processed).toBe(false);
+
+    // Payment must remain pending
+    const pendingPayment = await PaymentModel.findOne({ provider: 'stripe', eventId: tranId }).lean();
+    expect(pendingPayment?.status).toBe('pending');
+
+    // 2. Payment fails asynchronously: checkout.session.async_payment_failed
+    const failPayload = {
+      id: `evt_failed_${Date.now()}`,
+      object: 'event',
+      type: 'checkout.session.async_payment_failed',
+      data: {
+        object: {
+          id: `cs_fail_${Date.now()}`,
+          client_reference_id: tranId,
+          metadata: { tranId },
+        },
+      },
+    };
+    const failSig = stripe.webhooks.generateTestHeaderString({
+      payload: JSON.stringify(failPayload),
+      secret: webhookSecret,
+    });
+
+    const failRes = await request(app)
+      .post('/api/v1/billing/stripe/webhook')
+      .set('stripe-signature', failSig)
+      .send(failPayload);
+    expect(failRes.status).toBe(200);
+    expect(failRes.body.data.processed).toBe(true);
+
+    const failedPayment = await PaymentModel.findOne({ provider: 'stripe', eventId: tranId }).lean();
+    expect(failedPayment?.status).toBe('failed');
+  });
+
+  // 38. Codex Review Fix — Daily Cadence & Notification De-Duplication
+  it('38. Notification De-duplication: reminder jobs do not spam duplicate notifications within 24 hours', async () => {
+    const shop = await registerShop({ shopName: 'Reminder Deduplication Shop', email: 'reminddedup@dokanos.bd' });
+
+    // Set expiration to 2 days from now (within 3-day reminder window)
+    const twoDaysAhead = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+    await TenantModel.findByIdAndUpdate(shop.tenantId, {
+      plan: 'pro',
+      planExpiresAt: twoDaysAhead,
+      trialEndsAt: twoDaysAhead,
+    });
+
+    // Run first time: should send reminder
+    const res1 = await executeJobForTenant('subscription-expiry', shop.tenantId);
+    expect(res1).toMatch(/Sent expiry reminder/i);
+
+    const notifsAfterFirst = await NotificationModel.find({
+      tenantId: shop.tenantId,
+      type: 'subscription',
+      title: /Pro Expiring/i,
+    });
+    expect(notifsAfterFirst.length).toBe(1);
+
+    // Run second time immediately: should detect previous reminder and skip
+    const res2 = await executeJobForTenant('subscription-expiry', shop.tenantId);
+    expect(res2).toMatch(/already sent within 24h/i);
+
+    const notifsAfterSecond = await NotificationModel.find({
+      tenantId: shop.tenantId,
+      type: 'subscription',
+      title: /Pro Expiring/i,
+    });
+    expect(notifsAfterSecond.length).toBe(1); // Still exactly 1, no duplicate spam!
   });
 });
