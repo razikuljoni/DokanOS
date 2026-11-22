@@ -20,6 +20,7 @@ import {
   ShoppingCart,
   Sun,
   Truck,
+  UserCheck,
   Users,
   X,
 } from 'lucide-react';
@@ -50,6 +51,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/app/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'dashboard:read' },
   { to: '/app/sales/new', label: 'POS Terminal', icon: ShoppingCart, permission: 'sales:write' },
   { to: '/app/sales', label: 'Sales Ledger', icon: Receipt, permission: 'sales:read', end: true },
+  { to: '/app/customers', label: 'Customers', icon: UserCheck, permission: 'customers:read' },
   { to: '/app/products', label: 'Products & Stock', icon: Package, permission: 'products:read' },
   { to: '/app/purchases', label: 'Purchases', icon: ShoppingBag, permission: 'purchases:read' },
   { to: '/app/suppliers', label: 'Suppliers', icon: Truck, permission: 'suppliers:read' },

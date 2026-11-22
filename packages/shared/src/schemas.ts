@@ -36,7 +36,7 @@ export const createProductSchema = z.object({
   supplierId: z.string().nullable().optional(),
 });
 
-export const updateProductSchema = createProductSchema.partial();
+export const updateProductSchema = createProductSchema.omit({ stock: true }).partial();
 
 export const stockAdjustSchema = z.object({
   productId: z.string().min(1, 'Product ID is required'),
@@ -53,12 +53,13 @@ export const saleItemInputSchema = z.object({
 });
 
 export const createSaleSchema = z.object({
-  items: z.array(saleItemInputSchema).min(1, 'At least one item is required'),
+  items: z.array(saleItemInputSchema).min(1, 'At least one item is required').max(100, 'Cannot exceed 100 items per sale'),
   discount: z.number().nonnegative('Discount cannot be negative').default(0),
   paymentMethod: z.enum(PAYMENT_METHODS),
   paidAmount: z.number().nonnegative('Paid amount cannot be negative'),
   customerName: z.string().trim().max(80).optional(),
   customerPhone: z.string().trim().max(25).optional(),
+  customerId: z.string().optional(),
   idempotencyKey: z.string().trim().min(8).max(128).optional(),
 });
 
@@ -70,7 +71,7 @@ export const purchaseItemInputSchema = z.object({
 
 export const createPurchaseSchema = z.object({
   supplierId: z.string().min(1, 'Supplier is required'),
-  items: z.array(purchaseItemInputSchema).min(1, 'At least one item is required'),
+  items: z.array(purchaseItemInputSchema).min(1, 'At least one item is required').max(100, 'Cannot exceed 100 items per purchase'),
   paidAmount: z.number().nonnegative('Paid amount cannot be negative'),
 });
 
@@ -136,4 +137,12 @@ export const acceptInviteSchema = z.object({
   inviteToken: z.string().trim().min(1, 'Invite token is required'),
   password: z.string().min(8, 'Password must be at least 8 characters').max(100),
 });
+
+export const createCustomerSchema = z.object({
+  name: z.string().trim().min(2, 'Customer name must be at least 2 characters').max(80),
+  phone: z.string().trim().min(6, 'Phone number must be at least 6 characters').max(25),
+  address: z.string().trim().max(200).optional().default(''),
+});
+
+export const updateCustomerSchema = createCustomerSchema.partial();
 

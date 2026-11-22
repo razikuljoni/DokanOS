@@ -16,6 +16,7 @@ import {
 const DashboardPage = lazy(() => import('@/routes/DashboardPage').then((m) => ({ default: m.DashboardPage })));
 const PosPage = lazy(() => import('@/routes/PosPage').then((m) => ({ default: m.PosPage })));
 const SalesListPage = lazy(() => import('@/routes/SalesListPage').then((m) => ({ default: m.SalesListPage })));
+const CustomersPage = lazy(() => import('@/routes/CustomersPages').then((m) => ({ default: m.CustomersPage })));
 const ProductsListPage = lazy(() => import('@/routes/ProductsPages').then((m) => ({ default: m.ProductsListPage })));
 const ProductDetailPage = lazy(() => import('@/routes/ProductsPages').then((m) => ({ default: m.ProductDetailPage })));
 const PurchasesPage = lazy(() => import('@/routes/PurchasesAndSuppliersPages').then((m) => ({ default: m.PurchasesPage })));
@@ -92,6 +93,7 @@ export default function App(): React.ReactElement {
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="sales/new" element={<PosPage />} />
             <Route path="sales" element={<SalesListPage />} />
+            <Route path="customers" element={<CustomersPage />} />
             <Route path="products" element={<ProductsListPage />} />
             <Route path="products/:id" element={<ProductDetailPage />} />
             <Route path="purchases" element={<PurchasesPage />} />

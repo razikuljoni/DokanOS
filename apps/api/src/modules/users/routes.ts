@@ -14,7 +14,11 @@ import { requireAuth } from '../../middleware/auth.js';
 import { requireTenant } from '../../middleware/tenant.js';
 import { requirePermission } from '../../middleware/rbac.js';
 import { AppError } from '../../utils/errors.js';
-import { toObjectIdParam } from '../../utils/pagination.js';
+import {
+  buildPaginationMeta,
+  parsePagination,
+  toObjectIdParam,
+} from '../../utils/pagination.js';
 import { recordAuditLog } from '../../utils/audit.js';
 import { env } from '../../config/env.js';
 
@@ -25,14 +29,25 @@ usersRouter.use(requireAuth, requireTenant);
 // GET /api/v1/users
 usersRouter.get('/', requirePermission('staff:read'), async (req, res, next) => {
   try {
-    const users = await UserModel.find({
+    const { page, limit, skip } = parsePagination(req.query as Record<string, unknown>, 100);
+    const filter = {
       tenantId: new Types.ObjectId(req.tenant!.id),
-    })
-      .select('-passwordHash')
-      .sort({ createdAt: 1 })
-      .lean();
+    };
 
-    res.status(200).json({ data: users });
+    const [users, total] = await Promise.all([
+      UserModel.find(filter)
+        .select('-passwordHash')
+        .sort({ createdAt: 1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      UserModel.countDocuments(filter),
+    ]);
+
+    res.status(200).json({
+      data: users,
+      meta: buildPaginationMeta(page, limit, total),
+    });
   } catch (err) {
     next(err);
   }

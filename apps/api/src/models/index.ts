@@ -260,6 +260,7 @@ export interface ISale extends Document {
   dueAmount: number;
   customerName: string;
   customerPhone: string;
+  customerId?: Types.ObjectId | null;
   soldBy: Types.ObjectId;
   isReturned: boolean;
   createdAt: Date;
@@ -293,6 +294,7 @@ const saleSchema = new Schema<ISale>(
     dueAmount: { type: Number, required: true, min: 0 },
     customerName: { type: String, default: 'Walk-in Customer' },
     customerPhone: { type: String, default: '' },
+    customerId: { type: Schema.Types.ObjectId, ref: 'Customer', default: null },
     soldBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     isReturned: { type: Boolean, default: false },
   },
@@ -301,6 +303,9 @@ const saleSchema = new Schema<ISale>(
 
 saleSchema.index({ tenantId: 1, createdAt: -1 });
 saleSchema.index({ tenantId: 1, invoiceNo: 1 }, { unique: true });
+saleSchema.index({ tenantId: 1, dueAmount: 1 });
+saleSchema.index({ tenantId: 1, paymentStatus: 1 });
+saleSchema.index({ tenantId: 1, customerId: 1 });
 saleSchema.index(
   { tenantId: 1, idempotencyKey: 1 },
   { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } },
@@ -338,6 +343,39 @@ const supplierSchema = new Schema<ISupplier>(
 export const SupplierModel =
   (mongoose.models.Supplier as mongoose.Model<ISupplier> | undefined) ??
   mongoose.model<ISupplier>('Supplier', supplierSchema);
+
+// 7b. Customer
+export interface ICustomer extends Document {
+  _id: Types.ObjectId;
+  tenantId: Types.ObjectId;
+  name: string;
+  phone: string;
+  address?: string;
+  balanceDue: number;
+  totalSpent: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const customerSchema = new Schema<ICustomer>(
+  {
+    tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
+    name: { type: String, required: true, trim: true },
+    phone: { type: String, required: true, trim: true },
+    address: { type: String, default: '', trim: true },
+    balanceDue: { type: Number, default: 0, min: 0 },
+    totalSpent: { type: Number, default: 0, min: 0 },
+  },
+  { timestamps: true },
+);
+
+customerSchema.index({ tenantId: 1, phone: 1 }, { unique: true });
+customerSchema.index({ tenantId: 1, name: 1 });
+customerSchema.index({ tenantId: 1, balanceDue: -1 });
+
+export const CustomerModel =
+  (mongoose.models.Customer as mongoose.Model<ICustomer> | undefined) ??
+  mongoose.model<ICustomer>('Customer', customerSchema);
 
 // 8. Purchase
 export interface IPurchaseItem {
@@ -389,6 +427,9 @@ const purchaseSchema = new Schema<IPurchase>(
   { timestamps: true },
 );
 
+purchaseSchema.index({ tenantId: 1, supplierId: 1 });
+purchaseSchema.index({ tenantId: 1, createdAt: -1 });
+
 export const PurchaseModel =
   (mongoose.models.Purchase as mongoose.Model<IPurchase> | undefined) ??
   mongoose.model<IPurchase>('Purchase', purchaseSchema);
@@ -427,6 +468,7 @@ duePaymentSchema.index(
   { tenantId: 1, idempotencyKey: 1 },
   { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } },
 );
+duePaymentSchema.index({ tenantId: 1, createdAt: -1 });
 
 export const DuePaymentModel =
   (mongoose.models.DuePayment as mongoose.Model<IDuePayment> | undefined) ??
@@ -565,6 +607,8 @@ const auditLogSchema = new Schema<IAuditLog>(
   },
   { timestamps: { createdAt: true, updatedAt: false } },
 );
+
+auditLogSchema.index({ tenantId: 1, createdAt: -1 });
 
 export const AuditLogModel =
   (mongoose.models.AuditLog as mongoose.Model<IAuditLog> | undefined) ??

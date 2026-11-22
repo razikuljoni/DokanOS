@@ -8,13 +8,14 @@ import {
   updateProductSchema,
   type ProductUnit,
 } from '@dokanos/shared';
-import { ProductModel, SaleModel, StockMovementModel } from '../../models/index.js';
+import { ProductModel, SaleModel, StockMovementModel, SupplierModel } from '../../models/index.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { requireTenant } from '../../middleware/tenant.js';
 import { requirePermission } from '../../middleware/rbac.js';
 import { AppError } from '../../utils/errors.js';
 import {
   buildPaginationMeta,
+  escapeRegex,
   parsePagination,
   toObjectIdParam,
 } from '../../utils/pagination.js';
@@ -49,6 +50,7 @@ productsRouter.get('/low-stock', requirePermission('products:read'), async (req,
 
     const items = await ProductModel.find(filter)
       .sort({ stock: 1, name: 1 })
+      .limit(100)
       .lean();
 
     const outOfStockCount = items.filter((item) => item.stock <= 0).length;
@@ -82,6 +84,7 @@ productsRouter.get('/export', requirePermission('products:read'), async (req, re
       isActive: true,
     })
       .sort({ name: 1 })
+      .limit(1000)
       .lean();
 
     const header = 'name,category,unit,sku,costPrice,sellPrice,stock,lowStockAt';
@@ -120,6 +123,10 @@ productsRouter.post('/import', requirePermission('products:write'), async (req, 
 
     if (lines.length < 2) {
       throw AppError.badRequest('CSV must include a header row and at least one product row');
+    }
+
+    if (lines.length > 501) {
+      throw AppError.badRequest('CSV import is capped at 500 product rows per batch');
     }
 
     const tenantObjectId = new Types.ObjectId(req.tenant!.id);
@@ -194,10 +201,11 @@ productsRouter.get('/', requirePermission('products:read'), async (req, res, nex
 
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
     if (search) {
+      const escaped = escapeRegex(search);
       filter.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { sku: { $regex: search, $options: 'i' } },
-        { category: { $regex: search, $options: 'i' } },
+        { name: { $regex: escaped, $options: 'i' } },
+        { sku: { $regex: escaped, $options: 'i' } },
+        { category: { $regex: escaped, $options: 'i' } },
       ];
     }
 
@@ -216,8 +224,10 @@ productsRouter.get('/', requirePermission('products:read'), async (req, res, nex
       filter.$expr = { $gt: ['$stock', '$lowStockAt'] };
     }
 
+    const ALLOWED_SORT_FIELDS = ['name', 'category', 'stock', 'costPrice', 'sellPrice', 'createdAt'];
     const sortParam = typeof req.query.sort === 'string' ? req.query.sort : 'name:asc';
-    const [sortField = 'name', sortDir = 'asc'] = sortParam.split(':');
+    const [rawField = 'name', sortDir = 'asc'] = sortParam.split(':');
+    const sortField = ALLOWED_SORT_FIELDS.includes(rawField) ? rawField : 'name';
     const sortObj: Record<string, 1 | -1> = {
       [sortField]: sortDir === 'desc' ? -1 : 1,
     };
@@ -299,6 +309,17 @@ productsRouter.post('/', requirePermission('products:write'), async (req, res, n
       }
     }
 
+    if (parsed.supplierId) {
+      const sup = await SupplierModel.findOne({
+        _id: new Types.ObjectId(parsed.supplierId),
+        tenantId: tenantObjectId,
+        isActive: true,
+      });
+      if (!sup) {
+        throw AppError.notFound('Supplier not found in this shop');
+      }
+    }
+
     const existingSku = await ProductModel.findOne({
       tenantId: tenantObjectId,
       sku: parsed.sku,
@@ -340,6 +361,15 @@ productsRouter.post('/', requirePermission('products:write'), async (req, res, n
       });
     }
 
+    await recordAuditLog({
+      tenantId: req.tenant!.id,
+      userId: req.user!.id,
+      action: 'product.created',
+      entity: 'Product',
+      entityId: created._id.toString(),
+      changes: { name: created.name, sku: created.sku },
+    });
+
     await invalidateTenantCache(req.tenant!.id);
 
     res.status(201).json({ data: created });
@@ -351,9 +381,41 @@ productsRouter.post('/', requirePermission('products:write'), async (req, res, n
 // PATCH /api/v1/products/:id
 productsRouter.patch('/:id', requirePermission('products:write'), async (req, res, next) => {
   try {
+    if ((req.body as Record<string, unknown>).stock !== undefined) {
+      throw AppError.badRequest(
+        'Stock cannot be modified directly via product update. Use /stock/adjust for audited inventory changes.',
+      );
+    }
+
     const productObjectId = toObjectIdParam(req.params.id, 'Product not found');
     const parsed = updateProductSchema.parse(req.body);
     const tenantObjectId = new Types.ObjectId(req.tenant!.id);
+
+    if (parsed.supplierId) {
+      const sup = await SupplierModel.findOne({
+        _id: new Types.ObjectId(parsed.supplierId),
+        tenantId: tenantObjectId,
+        isActive: true,
+      });
+      if (!sup) {
+        throw AppError.notFound('Supplier not found in this shop');
+      }
+    }
+
+    if (parsed.sku) {
+      const dup = await ProductModel.findOne({
+        tenantId: tenantObjectId,
+        sku: parsed.sku,
+        _id: { $ne: productObjectId },
+      });
+      if (dup) {
+        throw new AppError(
+          409,
+          ERROR_CODES.CONFLICT,
+          `Product with SKU '${parsed.sku}' already exists in this shop`,
+        );
+      }
+    }
 
     const updated = await ProductModel.findOneAndUpdate(
       { _id: productObjectId, tenantId: tenantObjectId },
@@ -364,6 +426,15 @@ productsRouter.patch('/:id', requirePermission('products:write'), async (req, re
     if (!updated) {
       throw AppError.notFound('Product not found');
     }
+
+    await recordAuditLog({
+      tenantId: req.tenant!.id,
+      userId: req.user!.id,
+      action: 'product.updated',
+      entity: 'Product',
+      entityId: updated._id.toString(),
+      changes: parsed as Record<string, unknown>,
+    });
 
     await invalidateTenantCache(req.tenant!.id);
     res.status(200).json({ data: updated });

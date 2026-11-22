@@ -6,7 +6,13 @@ import { requireAuth } from '../../middleware/auth.js';
 import { requireTenant } from '../../middleware/tenant.js';
 import { requirePermission } from '../../middleware/rbac.js';
 import { AppError } from '../../utils/errors.js';
-import { toObjectIdParam } from '../../utils/pagination.js';
+import {
+  buildPaginationMeta,
+  escapeRegex,
+  parsePagination,
+  toObjectIdParam,
+} from '../../utils/pagination.js';
+import { recordAuditLog } from '../../utils/audit.js';
 
 export const suppliersRouter = Router();
 
@@ -15,14 +21,34 @@ suppliersRouter.use(requireAuth, requireTenant);
 // GET /api/v1/suppliers
 suppliersRouter.get('/', requirePermission('suppliers:read'), async (req, res, next) => {
   try {
-    const suppliers = await SupplierModel.find({
+    const { page, limit, skip } = parsePagination(req.query as Record<string, unknown>, 100);
+    const filter: Record<string, unknown> = {
       tenantId: new Types.ObjectId(req.tenant!.id),
       isActive: true,
-    })
-      .sort({ totalDue: -1, name: 1 })
-      .lean();
+    };
 
-    res.status(200).json({ data: suppliers });
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    if (search) {
+      const escaped = escapeRegex(search);
+      filter.$or = [
+        { name: { $regex: escaped, $options: 'i' } },
+        { phone: { $regex: escaped, $options: 'i' } },
+      ];
+    }
+
+    const [suppliers, total] = await Promise.all([
+      SupplierModel.find(filter)
+        .sort({ totalDue: -1, name: 1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      SupplierModel.countDocuments(filter),
+    ]);
+
+    res.status(200).json({
+      data: suppliers,
+      meta: buildPaginationMeta(page, limit, total),
+    });
   } catch (err) {
     next(err);
   }
@@ -41,7 +67,36 @@ suppliersRouter.post('/', requirePermission('suppliers:write'), async (req, res,
       isActive: true,
     });
 
+    await recordAuditLog({
+      tenantId: req.tenant!.id,
+      userId: req.user!.id,
+      action: 'supplier.created',
+      entity: 'Supplier',
+      entityId: created._id.toString(),
+      changes: { name: created.name, phone: created.phone },
+    });
+
     res.status(201).json({ data: created });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/v1/suppliers/:id
+suppliersRouter.get('/:id', requirePermission('suppliers:read'), async (req, res, next) => {
+  try {
+    const supplierObjectId = toObjectIdParam(req.params.id, 'Supplier not found');
+    const supplier = await SupplierModel.findOne({
+      _id: supplierObjectId,
+      tenantId: new Types.ObjectId(req.tenant!.id),
+      isActive: true,
+    }).lean();
+
+    if (!supplier) {
+      throw AppError.notFound('Supplier not found');
+    }
+
+    res.status(200).json({ data: supplier });
   } catch (err) {
     next(err);
   }
@@ -56,6 +111,7 @@ suppliersRouter.patch('/:id', requirePermission('suppliers:write'), async (req, 
       {
         _id: supplierObjectId,
         tenantId: new Types.ObjectId(req.tenant!.id),
+        isActive: true,
       },
       { $set: parsed },
       { new: true },
@@ -65,7 +121,47 @@ suppliersRouter.patch('/:id', requirePermission('suppliers:write'), async (req, 
       throw AppError.notFound('Supplier not found');
     }
 
+    await recordAuditLog({
+      tenantId: req.tenant!.id,
+      userId: req.user!.id,
+      action: 'supplier.updated',
+      entity: 'Supplier',
+      entityId: updated._id.toString(),
+      changes: parsed as Record<string, unknown>,
+    });
+
     res.status(200).json({ data: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/v1/suppliers/:id
+suppliersRouter.delete('/:id', requirePermission('suppliers:write'), async (req, res, next) => {
+  try {
+    const supplierObjectId = toObjectIdParam(req.params.id, 'Supplier not found');
+    const tenantObjectId = new Types.ObjectId(req.tenant!.id);
+
+    const supplier = await SupplierModel.findOneAndUpdate(
+      { _id: supplierObjectId, tenantId: tenantObjectId, isActive: true },
+      { $set: { isActive: false } },
+      { new: true },
+    ).lean();
+
+    if (!supplier) {
+      throw AppError.notFound('Supplier not found');
+    }
+
+    await recordAuditLog({
+      tenantId: req.tenant!.id,
+      userId: req.user!.id,
+      action: 'supplier.deleted',
+      entity: 'Supplier',
+      entityId: supplierObjectId.toString(),
+      changes: { name: supplier.name, phone: supplier.phone },
+    });
+
+    res.status(200).json({ ok: true });
   } catch (err) {
     next(err);
   }

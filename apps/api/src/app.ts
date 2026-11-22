@@ -14,6 +14,7 @@ import { stockRouter } from './modules/stock/routes.js';
 import { salesRouter } from './modules/sales/routes.js';
 import { purchasesRouter } from './modules/purchases/routes.js';
 import { suppliersRouter } from './modules/suppliers/routes.js';
+import { customersRouter } from './modules/customers/routes.js';
 import { duesRouter } from './modules/dues/routes.js';
 import { dashboardRouter } from './modules/dashboard/routes.js';
 import { notificationsRouter } from './modules/notifications/routes.js';
@@ -87,6 +88,7 @@ export function createApiApp(): Express {
   app.use('/api/v1/sales', salesRouter);
   app.use('/api/v1/purchases', purchasesRouter);
   app.use('/api/v1/suppliers', suppliersRouter);
+  app.use('/api/v1/customers', customersRouter);
   app.use('/api/v1/dues', duesRouter);
   app.use('/api/v1/dashboard', dashboardRouter);
   app.use('/api/v1/notifications', notificationsRouter);

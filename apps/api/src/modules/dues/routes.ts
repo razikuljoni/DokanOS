@@ -11,7 +11,11 @@ import { requireAuth } from '../../middleware/auth.js';
 import { requireTenant } from '../../middleware/tenant.js';
 import { requirePermission } from '../../middleware/rbac.js';
 import { AppError } from '../../utils/errors.js';
-import { toObjectIdParam } from '../../utils/pagination.js';
+import {
+  buildPaginationMeta,
+  parsePagination,
+  toObjectIdParam,
+} from '../../utils/pagination.js';
 import { invalidateTenantCache } from '../../config/redis.js';
 
 export type AgeingBucket = '0-7' | '8-30' | '30+';
@@ -144,8 +148,13 @@ duesRouter.get('/', requirePermission('dues:read'), async (req, res, next) => {
       .limit(20)
       .lean();
 
+    const total = entries.length;
+    const { page, limit, skip } = parsePagination(req.query as Record<string, unknown>, 100);
+    const paginatedEntries = entries.slice(skip, skip + limit);
+
     res.status(200).json({
-      data: entries,
+      data: paginatedEntries,
+      meta: buildPaginationMeta(page, limit, total),
       recentPayments,
     });
   } catch (err) {

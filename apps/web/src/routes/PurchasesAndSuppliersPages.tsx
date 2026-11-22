@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Truck, X } from 'lucide-react';
+import { Edit2, Plus, Trash2, Truck, X } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useUiStore } from '@/stores/uiStore';
 import { apiFetch } from '@/lib/api';
@@ -306,6 +306,11 @@ export function SuppliersPage(): React.ReactElement {
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
 
+  const [editingSupplier, setEditingSupplier] = useState<SupplierRow | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editAddress, setEditAddress] = useState('');
+
   const { data: suppliersRes, isLoading } = useQuery({
     queryKey: ['suppliers', tenant?.id],
     queryFn: () => apiFetch<{ data: SupplierRow[] }>('/api/v1/suppliers'),
@@ -316,7 +321,7 @@ export function SuppliersPage(): React.ReactElement {
     mutationFn: async () => {
       return apiFetch('/api/v1/suppliers', {
         method: 'POST',
-        body: JSON.stringify({ name, phone, address }),
+        body: JSON.stringify({ name: name.trim(), phone: phone.trim(), address: address.trim() }),
       });
     },
     onSuccess: () => {
@@ -330,6 +335,51 @@ export function SuppliersPage(): React.ReactElement {
       addToast({
         title: 'Could Not Add Supplier',
         description: err instanceof Error ? err.message : 'Check fields',
+        variant: 'danger',
+      });
+    },
+  });
+
+  const updateSupplierMutation = useMutation({
+    mutationFn: async () => {
+      if (!editingSupplier) return;
+      return apiFetch(`/api/v1/suppliers/${editingSupplier._id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: editName.trim(),
+          phone: editPhone.trim(),
+          address: editAddress.trim(),
+        }),
+      });
+    },
+    onSuccess: () => {
+      setEditingSupplier(null);
+      void queryClient.invalidateQueries({ queryKey: ['suppliers', tenant?.id] });
+      addToast({ title: 'Supplier Updated', variant: 'success' });
+    },
+    onError: (err) => {
+      addToast({
+        title: 'Could Not Update Supplier',
+        description: err instanceof Error ? err.message : 'Check fields',
+        variant: 'danger',
+      });
+    },
+  });
+
+  const deleteSupplierMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiFetch(`/api/v1/suppliers/${id}`, {
+        method: 'DELETE',
+      });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['suppliers', tenant?.id] });
+      addToast({ title: 'Supplier Removed', variant: 'success' });
+    },
+    onError: (err) => {
+      addToast({
+        title: 'Could Not Delete Supplier',
+        description: err instanceof Error ? err.message : 'Operation failed',
         variant: 'danger',
       });
     },
@@ -368,6 +418,45 @@ export function SuppliersPage(): React.ReactElement {
         >
           {formatBDT(row.totalDue)}
         </span>
+      ),
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      align: 'right',
+      render: (row) => (
+        <div className="flex items-center justify-end gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            title="Edit Supplier"
+            onClick={(e) => {
+              e.stopPropagation();
+              setEditingSupplier(row);
+              setEditName(row.name);
+              setEditPhone(row.phone);
+              setEditAddress(row.address);
+            }}
+          >
+            <Edit2 className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0 text-danger hover:text-danger hover:bg-danger/10"
+            title="Delete Supplier"
+            disabled={deleteSupplierMutation.isPending}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (window.confirm(`Delete supplier ${row.name}?`)) {
+                deleteSupplierMutation.mutate(row._id);
+              }
+            }}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
       ),
     },
   ];
@@ -444,6 +533,73 @@ export function SuppliersPage(): React.ReactElement {
           </Card>
         </div>
       </div>
+
+      {editingSupplier && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <Card className="w-full max-w-md bg-card shadow-2xl border-border">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <div>
+                <CardTitle className="text-base font-semibold">Edit Supplier</CardTitle>
+                <CardDescription>Update distributor contact details.</CardDescription>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => setEditingSupplier(null)}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-1">
+                <Label htmlFor="edit-sup-name">Supplier Name</Label>
+                <Input
+                  id="edit-sup-name"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="edit-sup-phone">Phone Number</Label>
+                <Input
+                  id="edit-sup-phone"
+                  value={editPhone}
+                  onChange={(e) => setEditPhone(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="edit-sup-addr">Address</Label>
+                <Input
+                  id="edit-sup-addr"
+                  value={editAddress}
+                  onChange={(e) => setEditAddress(e.target.value)}
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setEditingSupplier(null)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={
+                    updateSupplierMutation.isPending ||
+                    editName.trim().length < 2 ||
+                    editPhone.trim().length < 6
+                  }
+                  onClick={() => updateSupplierMutation.mutate()}
+                >
+                  {updateSupplierMutation.isPending ? 'Saving...' : 'Update Supplier'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

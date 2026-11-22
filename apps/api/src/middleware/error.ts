@@ -48,6 +48,47 @@ export const errorHandler: ErrorRequestHandler = (err: unknown, _req, res, _next
     return;
   }
 
+  // Mongoose CastError (e.g. invalid ObjectId format)
+  if (err instanceof Error && err.name === 'CastError') {
+    const payload: ApiErrorResponse = {
+      error: {
+        code: ERROR_CODES.VALIDATION,
+        message: 'Invalid identifier format',
+      },
+    };
+    res.status(400).json(payload);
+    return;
+  }
+
+  // Mongoose duplicate key error (code 11000)
+  if (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code: number }).code === 11000
+  ) {
+    const payload: ApiErrorResponse = {
+      error: {
+        code: ERROR_CODES.CONFLICT,
+        message: 'A resource with this identifier or unique field already exists',
+      },
+    };
+    res.status(409).json(payload);
+    return;
+  }
+
+  // BSON / BSONError
+  if (err instanceof Error && (err.name === 'BSONError' || err.name === 'BSONTypeError')) {
+    const payload: ApiErrorResponse = {
+      error: {
+        code: ERROR_CODES.VALIDATION,
+        message: 'Invalid BSON or data format',
+      },
+    };
+    res.status(400).json(payload);
+    return;
+  }
+
   logger.error('Unhandled API error', {
     message: err instanceof Error ? err.message : String(err),
   });

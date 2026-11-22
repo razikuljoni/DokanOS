@@ -21,6 +21,8 @@ import {
   resetPasswordSchema,
   changePasswordSchema,
   acceptInviteSchema,
+  createCustomerSchema,
+  updateCustomerSchema,
 } from './schemas.js';
 import type { ErrorCode } from './constants.js';
 
@@ -45,6 +47,8 @@ export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 export type AcceptInviteInput = z.infer<typeof acceptInviteSchema>;
+export type CreateCustomerInput = z.infer<typeof createCustomerSchema>;
+export type UpdateCustomerInput = z.infer<typeof updateCustomerSchema>;
 
 export interface ApiErrorResponse {
   error: {

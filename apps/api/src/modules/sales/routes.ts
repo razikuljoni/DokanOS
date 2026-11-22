@@ -2,6 +2,7 @@ import { Router } from 'express';
 import mongoose, { Types } from 'mongoose';
 import { createSaleSchema, type PaymentStatus } from '@dokanos/shared';
 import {
+  CustomerModel,
   NotificationModel,
   ProductModel,
   SaleModel,
@@ -15,6 +16,7 @@ import { requirePermission } from '../../middleware/rbac.js';
 import { AppError } from '../../utils/errors.js';
 import {
   buildPaginationMeta,
+  escapeRegex,
   parsePagination,
   toObjectIdParam,
 } from '../../utils/pagination.js';
@@ -149,11 +151,70 @@ salesRouter.post('/', requirePermission('sales:write'), async (req, res, next) =
         const paidAmount = Number(Math.min(parsed.paidAmount, total).toFixed(2));
         const dueAmount = Number(Math.max(0, total - paidAmount).toFixed(2));
 
+        if (dueAmount > 0) {
+          if (
+            !parsed.customerName ||
+            parsed.customerName.trim() === '' ||
+            parsed.customerName.trim().toLowerCase() === 'walk-in customer'
+          ) {
+            throw AppError.badRequest('Customer name is required for Baki (credit) sales');
+          }
+        }
+
         let paymentStatus: PaymentStatus = 'paid';
         if (dueAmount > 0 && paidAmount === 0) {
           paymentStatus = 'due';
         } else if (dueAmount > 0 && paidAmount > 0) {
           paymentStatus = 'partial';
+        }
+
+        let linkedCustomerId: Types.ObjectId | null = null;
+        if (parsed.customerId && Types.ObjectId.isValid(parsed.customerId)) {
+          const existingCust = await CustomerModel.findOne({
+            _id: new Types.ObjectId(parsed.customerId),
+            tenantId: tenantObjectId,
+          }).session(session);
+          if (existingCust) {
+            existingCust.totalSpent = Number((existingCust.totalSpent + total).toFixed(2));
+            existingCust.balanceDue = Number((existingCust.balanceDue + dueAmount).toFixed(2));
+            await existingCust.save({ session });
+            linkedCustomerId = existingCust._id;
+          }
+        } else if (
+          parsed.customerName &&
+          parsed.customerName.trim() !== '' &&
+          parsed.customerName.trim().toLowerCase() !== 'walk-in customer'
+        ) {
+          const cleanPhone = parsed.customerPhone?.trim() || '';
+          let cust = cleanPhone
+            ? await CustomerModel.findOne({
+                tenantId: tenantObjectId,
+                phone: cleanPhone,
+              }).session(session)
+            : null;
+
+          if (!cust) {
+            const fallbackPhone =
+              cleanPhone || `walkin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+            const createdCusts = await CustomerModel.create(
+              [
+                {
+                  tenantId: tenantObjectId,
+                  name: parsed.customerName.trim(),
+                  phone: fallbackPhone,
+                  balanceDue: dueAmount,
+                  totalSpent: total,
+                },
+              ],
+              { session },
+            );
+            cust = createdCusts[0]!;
+          } else {
+            cust.totalSpent = Number((cust.totalSpent + total).toFixed(2));
+            cust.balanceDue = Number((cust.balanceDue + dueAmount).toFixed(2));
+            await cust.save({ session });
+          }
+          linkedCustomerId = cust._id;
         }
 
         // Generate sequential invoiceNo per shop (INV-0001...)
@@ -184,6 +245,7 @@ salesRouter.post('/', requirePermission('sales:write'), async (req, res, next) =
               dueAmount,
               customerName: parsed.customerName || 'Walk-in Customer',
               customerPhone: parsed.customerPhone || '',
+              customerId: linkedCustomerId,
               soldBy: soldByObjectId,
               isReturned: false,
             },
@@ -297,10 +359,11 @@ salesRouter.get('/', requirePermission('sales:read'), async (req, res, next) => 
 
     if (typeof req.query.search === 'string' && req.query.search.trim()) {
       const q = req.query.search.trim();
+      const escaped = escapeRegex(q);
       filter.$or = [
-        { invoiceNo: { $regex: q, $options: 'i' } },
-        { customerName: { $regex: q, $options: 'i' } },
-        { customerPhone: { $regex: q, $options: 'i' } },
+        { invoiceNo: { $regex: escaped, $options: 'i' } },
+        { customerName: { $regex: escaped, $options: 'i' } },
+        { customerPhone: { $regex: escaped, $options: 'i' } },
       ];
     }
 
@@ -407,6 +470,26 @@ salesRouter.post('/:id/return', requirePermission('sales:return'), async (req, r
 
       sale.isReturned = true;
       await sale.save({ session });
+
+      if (sale.customerId) {
+        const cust = await CustomerModel.findOne({
+          _id: sale.customerId,
+          tenantId: tenantObjectId,
+        }).session(session);
+        if (cust) {
+          cust.totalSpent = Math.max(0, Number((cust.totalSpent - sale.total).toFixed(2)));
+          await cust.save({ session });
+        }
+      }
+
+      await recordAuditLog({
+        tenantId: req.tenant!.id,
+        userId: req.user!.id,
+        action: 'sale.returned',
+        entity: 'Sale',
+        entityId: sale._id.toString(),
+        changes: { invoiceNo: sale.invoiceNo, total: sale.total },
+      });
     });
 
     await invalidateTenantCache(req.tenant!.id);

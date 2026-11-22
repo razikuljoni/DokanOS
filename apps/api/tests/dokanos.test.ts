@@ -6,6 +6,8 @@ import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { ERROR_CODES } from '@dokanos/shared';
 import { createApiApp } from '../src/app.js';
 import {
+  AuditLogModel,
+  CustomerModel,
   DuePaymentModel,
   NotificationModel,
   PaymentModel,
@@ -58,6 +60,8 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
       PaymentModel.deleteMany({}),
       SubscriptionModel.deleteMany({}),
       NotificationModel.deleteMany({}),
+      CustomerModel.deleteMany({}),
+      AuditLogModel.deleteMany({}),
     ]);
   });
 
@@ -1571,5 +1575,306 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
       .patch(`/api/v1/notifications/${nonExistentId}/read`)
       .set('Authorization', `Bearer ${shop.accessToken}`);
     expect(notFoundRes.status).toBe(404);
+  });
+
+  // 28. Phase 5 — Stock Ledger Hardening & Supplier Scoping
+  it('28. Phase 5 Stock Hardening: direct stock update via PATCH /products/:id is rejected with 400, supplierId must belong to tenant', async () => {
+    const shop1 = await registerShop({
+      shopName: 'Stock Shop 1',
+      email: 'stock1@dokanos.bd',
+    });
+    const shop2 = await registerShop({
+      shopName: 'Stock Shop 2',
+      email: 'stock2@dokanos.bd',
+    });
+
+    // Create supplier in shop2
+    const sup2 = await SupplierModel.create({
+      tenantId: shop2.tenantId,
+      name: 'Shop 2 Supplier',
+      phone: '01700000002',
+    });
+
+    // Create product in shop1 with initial stock 50
+    const prodRes = await request(app)
+      .post('/api/v1/products')
+      .set('Authorization', `Bearer ${shop1.accessToken}`)
+      .send({
+        name: 'Paracetamol 500mg',
+        category: 'Medicine',
+        unit: 'pcs',
+        costPrice: 5,
+        sellPrice: 10,
+        stock: 50,
+        sku: 'PARA-500',
+      });
+    expect(prodRes.status).toBe(201);
+    const prodId = prodRes.body.data._id;
+
+    // 1. Attempt direct stock modification via PATCH /products/:id
+    const directStockPatch = await request(app)
+      .patch(`/api/v1/products/${prodId}`)
+      .set('Authorization', `Bearer ${shop1.accessToken}`)
+      .send({ stock: 200 });
+    expect(directStockPatch.status).toBe(400);
+    expect(directStockPatch.body.error.code).toBe(ERROR_CODES.VALIDATION);
+    expect(directStockPatch.body.error.message).toContain('Stock cannot be modified directly');
+
+    // Verify stock is still 50
+    const fetchedProd = await ProductModel.findById(prodId);
+    expect(fetchedProd?.stock).toBe(50);
+
+    // 2. Attempt assigning supplier belonging to another tenant
+    const foreignSupPatch = await request(app)
+      .patch(`/api/v1/products/${prodId}`)
+      .set('Authorization', `Bearer ${shop1.accessToken}`)
+      .send({ supplierId: sup2._id.toString() });
+    expect(foreignSupPatch.status).toBe(404);
+    expect(foreignSupPatch.body.error.code).toBe(ERROR_CODES.NOT_FOUND);
+    expect(foreignSupPatch.body.error.message).toContain('Supplier not found in this shop');
+  });
+
+  // 29. Phase 5 — Purchase Cost Change Audit
+  it('29. Phase 5 Purchase Cost Audit: cost price changes trigger product.cost_changed audit log and purchase.created', async () => {
+    const shop = await registerShop({
+      shopName: 'Purchase Audit Shop',
+      email: 'purchaseaudit@dokanos.bd',
+    });
+
+    const supplier = await SupplierModel.create({
+      tenantId: shop.tenantId,
+      name: 'Square Distributor',
+      phone: '01711223399',
+    });
+
+    const prod = await ProductModel.create({
+      tenantId: shop.tenantId,
+      name: 'Napa Extra',
+      category: 'Medicine',
+      unit: 'pcs',
+      costPrice: 10,
+      sellPrice: 15,
+      stock: 20,
+      sku: 'NAPA-EXTRA',
+    });
+
+    // Purchase with higher cost price: 12
+    const purchaseRes = await request(app)
+      .post('/api/v1/purchases')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({
+        supplierId: supplier._id.toString(),
+        items: [
+          {
+            productId: prod._id.toString(),
+            name: prod.name,
+            qty: 10,
+            costPrice: 12,
+            lineTotal: 120,
+          },
+        ],
+        total: 120,
+        paidAmount: 120,
+      });
+    expect(purchaseRes.status).toBe(201);
+
+    // Verify product costPrice was updated to 12
+    const updatedProd = await ProductModel.findById(prod._id);
+    expect(updatedProd?.costPrice).toBe(12);
+
+    // Verify cost_changed audit log entry
+    const costAudit = await AuditLogModel.findOne({
+      tenantId: shop.tenantId,
+      action: 'product.cost_changed',
+    });
+    expect(costAudit).not.toBeNull();
+    expect(costAudit?.changes.oldCostPrice).toBe(10);
+    expect(costAudit?.changes.newCostPrice).toBe(12);
+
+    // Verify purchase.created audit log
+    const purchaseAudit = await AuditLogModel.findOne({
+      tenantId: shop.tenantId,
+      action: 'purchase.created',
+    });
+    expect(purchaseAudit).not.toBeNull();
+  });
+
+  // 30. Phase 5 — Baki Sale Customer Validation & Balance Tracking
+  it('30. Phase 5 Baki Customer Validation: Baki sale requires customer name, creates customer and tracks due balance', async () => {
+    const shop = await registerShop({
+      shopName: 'Baki Shop',
+      email: 'baki@dokanos.bd',
+    });
+
+    const prod = await ProductModel.create({
+      tenantId: shop.tenantId,
+      name: 'Insulin Pen',
+      category: 'Medicine',
+      unit: 'pcs',
+      costPrice: 500,
+      sellPrice: 750,
+      stock: 10,
+      sku: 'INS-PEN',
+    });
+
+    // 1. Baki sale without customer name -> 400
+    const bakiNoCustomer = await request(app)
+      .post('/api/v1/sales')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({
+        items: [
+          {
+            productId: prod._id.toString(),
+            name: prod.name,
+            qty: 1,
+            unitPrice: 750,
+            lineTotal: 750,
+          },
+        ],
+        total: 750,
+        paidAmount: 250, // Due 500
+        paymentMethod: 'cash',
+      });
+    expect(bakiNoCustomer.status).toBe(400);
+    expect(bakiNoCustomer.body.error.code).toBe(ERROR_CODES.VALIDATION);
+    expect(bakiNoCustomer.body.error.message).toContain('Customer name is required');
+
+    // 2. Baki sale with customer name and phone
+    const bakiWithCustomer = await request(app)
+      .post('/api/v1/sales')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({
+        customerName: 'Hafizur Rahman',
+        customerPhone: '01899112233',
+        items: [
+          {
+            productId: prod._id.toString(),
+            name: prod.name,
+            qty: 1,
+            unitPrice: 750,
+            lineTotal: 750,
+          },
+        ],
+        total: 750,
+        paidAmount: 250,
+        paymentMethod: 'cash',
+      });
+    expect(bakiWithCustomer.status).toBe(201);
+    expect(bakiWithCustomer.body.data.dueAmount).toBe(500);
+    expect(bakiWithCustomer.body.data.customerId).toBeDefined();
+
+    // Verify Customer record created with balances
+    const customer = await CustomerModel.findOne({
+      tenantId: shop.tenantId,
+      phone: '01899112233',
+    });
+    expect(customer).not.toBeNull();
+    expect(customer?.name).toBe('Hafizur Rahman');
+    expect(customer?.balanceDue).toBe(500);
+    expect(customer?.totalSpent).toBe(750);
+  });
+
+  // 31. Phase 5 — Customers CRUD & History
+  it('31. Phase 5 Customers CRUD: create, list, inspect with history, update customer', async () => {
+    const shop = await registerShop({
+      shopName: 'Customer CRUD Shop',
+      email: 'customers@dokanos.bd',
+    });
+
+    // 1. Create customer
+    const createRes = await request(app)
+      .post('/api/v1/customers')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({
+        name: 'Kamal Hossain',
+        phone: '01722334455',
+        address: 'Uttara Sector 3, Dhaka',
+        notes: 'VIP customer',
+      });
+    expect(createRes.status).toBe(201);
+    const customerId = createRes.body.data._id;
+
+    // 2. List customers with search
+    const listRes = await request(app)
+      .get('/api/v1/customers?search=Kamal')
+      .set('Authorization', `Bearer ${shop.accessToken}`);
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.data.length).toBe(1);
+    expect(listRes.body.meta.total).toBe(1);
+
+    // 3. Inspect customer details with sales and dues
+    const detailRes = await request(app)
+      .get(`/api/v1/customers/${customerId}`)
+      .set('Authorization', `Bearer ${shop.accessToken}`);
+    expect(detailRes.status).toBe(200);
+    expect(detailRes.body.data.name).toBe('Kamal Hossain');
+    expect(Array.isArray(detailRes.body.data.sales)).toBe(true);
+    expect(Array.isArray(detailRes.body.data.openDues)).toBe(true);
+
+    // 4. Update customer
+    const updateRes = await request(app)
+      .patch(`/api/v1/customers/${customerId}`)
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({
+        address: 'Uttara Sector 7, Dhaka',
+      });
+    expect(updateRes.status).toBe(200);
+    expect(updateRes.body.data.address).toBe('Uttara Sector 7, Dhaka');
+  });
+
+  // 32. Phase 5 — Suppliers Edit & Soft-Delete
+  it('32. Phase 5 Suppliers: pagination, editing and soft deletion exclude supplier from active queries', async () => {
+    const shop = await registerShop({
+      shopName: 'Supplier Management Shop',
+      email: 'supmgmt@dokanos.bd',
+    });
+
+    const sup1 = await SupplierModel.create({
+      tenantId: shop.tenantId,
+      name: 'Incepta Pharma',
+      phone: '01711001122',
+    });
+
+    const sup2 = await SupplierModel.create({
+      tenantId: shop.tenantId,
+      name: 'Renata Ltd',
+      phone: '01711003344',
+    });
+
+    // 1. List suppliers with pagination
+    const listRes = await request(app)
+      .get('/api/v1/suppliers?limit=10')
+      .set('Authorization', `Bearer ${shop.accessToken}`);
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.data.length).toBe(2);
+    expect(listRes.body.meta.total).toBe(2);
+
+    // 2. Edit supplier
+    const editRes = await request(app)
+      .patch(`/api/v1/suppliers/${sup1._id}`)
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({
+        name: 'Incepta Pharmaceuticals PLC',
+        address: 'Tejgaon I/A, Dhaka',
+      });
+    expect(editRes.status).toBe(200);
+    expect(editRes.body.data.name).toBe('Incepta Pharmaceuticals PLC');
+
+    // 3. Soft-delete supplier
+    const delRes = await request(app)
+      .delete(`/api/v1/suppliers/${sup2._id}`)
+      .set('Authorization', `Bearer ${shop.accessToken}`);
+    expect(delRes.status).toBe(200);
+    expect(delRes.body.ok).toBe(true);
+    const softDeleted = await SupplierModel.findById(sup2._id);
+    expect(softDeleted?.isActive).toBe(false);
+
+    // 4. List suppliers now excludes soft-deleted supplier
+    const listAfter = await request(app)
+      .get('/api/v1/suppliers')
+      .set('Authorization', `Bearer ${shop.accessToken}`);
+    expect(listAfter.status).toBe(200);
+    expect(listAfter.body.data.length).toBe(1);
+    expect(listAfter.body.data[0].name).toBe('Incepta Pharmaceuticals PLC');
   });
 });
