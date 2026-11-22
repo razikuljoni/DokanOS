@@ -21,6 +21,7 @@ import {
 import { clearAllCacheForTests } from '../src/config/redis.js';
 import Stripe from 'stripe';
 import { env } from '../src/config/env.js';
+import { executeJobForTenant } from '../src/queues/worker.js';
 
 describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMemoryReplSet)', () => {
   const app = createApiApp();
@@ -1225,5 +1226,116 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
 
     const freshPayment = await PaymentModel.findOne({ eventId: freshTranId }).lean();
     expect(freshPayment?.status).toBe('pending');
+  });
+
+  // 20. Phase 3 — H2 Bug Verification (Codex P2)
+  it('20. Phase 3 H2: Expired trial tenant does NOT receive Pro low-stock email digest', async () => {
+    const shop = await registerShop({
+      shopName: 'H2 Expired Digest Pharmacy',
+      email: 'h2@dokanos.bd',
+    });
+
+    // Seed a low-stock product
+    await ProductModel.create({
+      tenantId: shop.tenantId,
+      name: 'Napa 500mg',
+      category: 'Medicine',
+      unit: 'pcs',
+      sku: 'H2-NAPA-01',
+      costPrice: 10,
+      sellPrice: 15,
+      stock: 2,
+      lowStockAt: 10,
+      isActive: true,
+    });
+
+    // Set trial expiration to 2 days in the past (stored plan still says pro)
+    const pastDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    await TenantModel.findByIdAndUpdate(shop.tenantId, {
+      $set: { plan: 'pro', planExpiresAt: pastDate, trialEndsAt: pastDate },
+    });
+
+    const summary = await executeJobForTenant('low-stock-digest', shop.tenantId);
+    expect(summary).toContain('Free plan - email skipped');
+
+    // In-app alert was still created
+    const notifs = await NotificationModel.find({ tenantId: shop.tenantId, type: 'low_stock' });
+    expect(notifs.length).toBeGreaterThanOrEqual(1);
+
+    // Now test with active Pro plan
+    const futureDate = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
+    await TenantModel.findByIdAndUpdate(shop.tenantId, {
+      $set: { plan: 'pro', planExpiresAt: futureDate, trialEndsAt: null },
+    });
+
+    const proSummary = await executeJobForTenant('low-stock-digest', shop.tenantId);
+    expect(proSummary).toContain('Pro digest sent');
+  });
+
+  // 21. Phase 3 — Subscription Expiry Job (H1, H2)
+  it('21. Phase 3 Subscription Expiry: Downgrades stored row to free plan when expired, sends reminder when expiring in 3 days', async () => {
+    const shop = await registerShop({
+      shopName: 'Expiry Test Pharmacy',
+      email: 'expiry@dokanos.bd',
+    });
+
+    // Case A: Expiring in 2 days (within 3-day reminder window)
+    const inTwoDays = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+    await TenantModel.findByIdAndUpdate(shop.tenantId, {
+      $set: { plan: 'pro', planExpiresAt: inTwoDays },
+    });
+
+    const reminderSummary = await executeJobForTenant('subscription-expiry', shop.tenantId);
+    expect(reminderSummary).toContain('Sent expiry reminder');
+
+    const reminderNotif = await NotificationModel.findOne({
+      tenantId: shop.tenantId,
+      type: 'subscription',
+      title: /Expiring in 2 days/,
+    });
+    expect(reminderNotif).not.toBeNull();
+
+    // Case B: Expired trial/subscription
+    const pastDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await TenantModel.findByIdAndUpdate(shop.tenantId, {
+      $set: { plan: 'pro', planExpiresAt: pastDate, trialEndsAt: pastDate },
+    });
+
+    const expiredSummary = await executeJobForTenant('subscription-expiry', shop.tenantId);
+    expect(expiredSummary).toContain('Downgraded');
+
+    // Stored row MUST now say free in DB (stopped lying)
+    const storedTenant = await TenantModel.findById(shop.tenantId).lean();
+    expect(storedTenant?.plan).toBe('free');
+    expect(storedTenant?.planExpiresAt).toBeNull();
+
+    const expiredNotif = await NotificationModel.findOne({
+      tenantId: shop.tenantId,
+      type: 'subscription',
+      title: /Subscription Expired/,
+    });
+    expect(expiredNotif).not.toBeNull();
+  });
+
+  // 22. Phase 3 — External Cron Endpoint
+  it('22. Phase 3 External Cron: POST /api/v1/admin/jobs/cron/run with service credential executes jobs', async () => {
+    await registerShop({
+      shopName: 'Cron Target Shop',
+      email: 'cron@dokanos.bd',
+    });
+
+    // Unauthenticated call with invalid secret returns 401
+    const unauthRes = await request(app)
+      .post('/api/v1/admin/jobs/cron/run')
+      .set('x-cron-secret', 'wrong-secret-123');
+    expect(unauthRes.status).toBe(401);
+
+    // Call with valid secret executes successfully
+    const authRes = await request(app)
+      .post('/api/v1/admin/jobs/cron/run')
+      .set('x-cron-secret', env.JWT_ACCESS_SECRET);
+    expect(authRes.status).toBe(200);
+    expect(authRes.body.ok).toBe(true);
+    expect(authRes.body.jobs.length).toBe(3);
   });
 });

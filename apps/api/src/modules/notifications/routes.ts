@@ -38,9 +38,10 @@ export async function sendResendEmail(params: {
   }
 
   try {
+    const fromAddress = env.RESEND_FROM_EMAIL || 'DokanOS <onboarding@resend.dev>';
     const resend = new Resend(env.RESEND_API_KEY);
     await resend.emails.send({
-      from: 'DokanOS <onboarding@resend.dev>',
+      from: fromAddress,
       to: params.to,
       subject: params.subject,
       html: params.html,

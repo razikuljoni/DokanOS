@@ -22,6 +22,8 @@ export interface EnvConfig {
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
   SEED_DEMO: boolean;
+  CRON_SECRET?: string;
+  RESEND_FROM_EMAIL?: string;
 }
 
 const nodeEnvRaw = process.env.NODE_ENV ?? 'development';
@@ -82,4 +84,6 @@ export const env: EnvConfig = {
   STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
   STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,
   SEED_DEMO: nodeEnv === 'production' ? false : (process.env.SEED_DEMO ?? 'true') === 'true',
+  CRON_SECRET: process.env.CRON_SECRET,
+  RESEND_FROM_EMAIL: process.env.RESEND_FROM_EMAIL,
 };

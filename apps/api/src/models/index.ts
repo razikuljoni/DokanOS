@@ -557,3 +557,35 @@ const auditLogSchema = new Schema<IAuditLog>(
 export const AuditLogModel =
   (mongoose.models.AuditLog as mongoose.Model<IAuditLog> | undefined) ??
   mongoose.model<IAuditLog>('AuditLog', auditLogSchema);
+
+// 14. JobRun (Persistent background job execution log)
+export interface IJobRun extends Document {
+  _id: Types.ObjectId;
+  jobName: string;
+  tenantId?: Types.ObjectId | null;
+  status: 'completed' | 'failed';
+  summary: string;
+  error?: string | null;
+  durationMs: number;
+  triggeredBy: 'scheduler' | 'cron' | 'manual';
+  createdAt: Date;
+}
+
+const jobRunSchema = new Schema<IJobRun>(
+  {
+    jobName: { type: String, required: true, index: true },
+    tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', default: null },
+    status: { type: String, enum: ['completed', 'failed'], required: true },
+    summary: { type: String, required: true },
+    error: { type: String, default: null },
+    durationMs: { type: Number, default: 0 },
+    triggeredBy: { type: String, enum: ['scheduler', 'cron', 'manual'], default: 'scheduler' },
+  },
+  { timestamps: { createdAt: true, updatedAt: false } },
+);
+
+jobRunSchema.index({ jobName: 1, createdAt: -1 });
+
+export const JobRunModel =
+  (mongoose.models.JobRun as mongoose.Model<IJobRun> | undefined) ??
+  mongoose.model<IJobRun>('JobRun', jobRunSchema);
