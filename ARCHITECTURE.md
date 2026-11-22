@@ -80,7 +80,13 @@ Prepaid periods (30-day "Pro") are atomic, where database IPNs and redirects val
 ### 5. In-Process BullMQ Workers
 To run on free-tier Render instances without requiring extra paid worker background dynos, BullMQ workers (`daily-low-stock-digest`, `weekly-sales-summary`, `subscription-expiry-sweep`) run in-process alongside Express whenever `UPSTASH_REDIS_URL` is configured, failing over to direct inline execution if Redis is omitted.
 
-### 6. Scoped PWA Offline Outbox
+### 6. Customer Management & Pagination
+Customer records are tenant-scoped under `CustomerModel` with compound index `{ tenantId: 1, phone: 1 }`. The `/api/v1/customers` endpoint supports paginated search, purchase history aggregations, and outstanding Baki calculation. All list endpoints (products, sales, dues, customers) enforce query pagination with `page` and `limit`.
+
+### 7. Deep Health Probes
+The `/health` endpoint executes live ping probes against both MongoDB (`db.admin().ping()`) and Upstash Redis (`redis.ping()`). In unhealthy states, it responds with `503 Service Unavailable` detailing the failed dependency, allowing cloud load balancers and container orchestrators to route traffic safely.
+
+### 8. Scoped PWA Offline Outbox
 Service workers precache the app shell, and IndexedDB stores tenant-scoped product and Baki snapshots (`{tenantId}:{resourceKey}`). Sales queued while offline use client-generated `idempotencyKey` enforced by a partial unique index on `Sale` and `DuePayment`, protecting the system from double-sync replay effects.
 
 ---

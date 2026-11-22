@@ -33,8 +33,19 @@ Comprehensive audit and remediation conducted on 2026-10-31 across security, per
 
 ## Test Results
 
-- **API Tests (`pnpm --filter api test`):** 16 passed, 0 failed (100%).
-- **Web Build (`pnpm build`):** Success with route-level chunk splitting.
+- **API Tests (`pnpm --filter api test`):** 46 passed, 0 failed (100%).
+- **Web Build (`pnpm build`):** Success with route-level chunk splitting (PWA precache optimized to 1.9MB).
+
+## Comprehensive 8-Phase Remediation (2026-11-22)
+
+1. **Phase 0 (Security & Prod Guard):** Server startup guard detects default placeholder secrets in `NODE_ENV=production` and aborts boot. Demo seed gated behind `SEED_DEMO=true`.
+2. **Phase 1 & 2 (Billing & Gateway Verification):** Robust SSLCommerz callback signature verification with MD5/SHA-256; GET callbacks convert to read-only state checks with redirect to `${FRONTEND_URL}/app/billing`. Live SSLCommerz Sandbox v4 integration with Stripe card checkout.
+3. **Phase 3 (Scheduler & Trial Expiry):** Real scheduler engine with BullMQ and in-process interval fallback. Automated trial expiry sweep downgrades expired Pro trials to Free plan limits.
+4. **Phase 4 (Authentication & Token Security):** Crypto-secure SHA-256 token hashing for password reset and staff invitations. Tenant-scoped login isolation.
+5. **Phase 5 (Ledger Integrity & Customer CRUD):** Append-only immutable stock ledger; atomic MongoDB replica-set transactions on all product, stock, and sale mutations. Complete Customer management CRUD (`/api/v1/customers`).
+6. **Phase 6 (Frontend Quality & Mobile UX):** Route-level RBAC middleware; React Error Boundary; skeleton loading states; responsive mobile drawer navigation.
+7. **Phase 7 (Health Probes & Disaster Recovery):** Live MongoDB and Redis ping probes on `/health`. Automated Atlas M0 backup and restore utility script (`scripts/backup-restore.sh`).
+8. **Repo Hygiene & Modernization:** Purged AI Studio artifacts (`.aistudio`, `metadata.json`, `public/assets/aistudio`), pruned unused `@google/genai` dependency (-30 packages), added `.dockerignore`, and upgraded all packages to latest stable LTS.
 
 ## Needs Decision List
 

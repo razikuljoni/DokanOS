@@ -1,0 +1,39 @@
+name: Database Backup (Atlas M0 Snapshot)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * 0' # Weekly every Sunday at 02:00 UTC
+
+jobs:
+  backup:
+    name: Run mongodump snapshot & store artifact
+    runs-on: ubuntu-latest
+    if: ${{ secrets.MONGODB_URI != '' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install MongoDB Database Tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y mongodb-database-tools
+
+      - name: Run Snapshot Backup
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        run: |
+          bash scripts/backup-restore.sh backup ./backups
+
+      - name: Verify Snapshot Archive
+        run: |
+          LATEST_BACKUP=$(ls -t ./backups/*.gz | head -n 1)
+          bash scripts/backup-restore.sh verify "$LATEST_BACKUP"
+
+      - name: Upload Backup Artifact (30 Days Retention)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dokanos-atlas-m0-backup
+          path: ./backups/*.gz
+          retention-days: 30

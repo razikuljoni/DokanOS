@@ -12,6 +12,55 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [1.1.0] - 2026-11-22
+
+### Production Hardening & Security (Phase 0)
+- Enforced production startup guard: server blocks boot if default placeholder secrets (`CHANGE_ME`, `replace-with`) are detected in `NODE_ENV=production`.
+- Gated demo database seeding strictly behind `SEED_DEMO=true`.
+- Gated in-app SSLCommerz sandbox simulator behind `NODE_ENV=development`.
+
+### Billing & Gateway Verification (Phases 1 & 2)
+- Added robust SSLCommerz callback signature verification with MD5 / SHA-256 validation.
+- Converted GET callback handlers to read-only state checks with redirect to `${FRONTEND_URL}/app/billing`.
+- Wired live SSLCommerz Sandbox v4 API endpoint (`https://sandbox.sslcommerz.com/gwprocess/v4/api.php`) for hosted GatewayPageURL checkout.
+- Added Stripe Checkout Session support with card payment processing and webhook handling (`whsec_...`).
+- Built in-app subscription modal supporting 14-day Pro trial and annual billing options.
+
+### Scheduler & Trial Expiry (Phase 3)
+- Implemented real scheduler engine with in-process interval fallback when Redis is absent.
+- Built trial expiry sweep worker: downgrades expired Pro trials to Free plan (`100` product and `1` staff member limits) and emits system notifications.
+
+### Authentication & Token Security (Phase 4)
+- Added crypto-secure SHA-256 token hashing for password reset (`crypto.randomBytes(32)`).
+- Added hashed staff invitation tokens with 7-day expiration.
+- Implemented tenant-scoped login isolation preventing credential reuse across shops.
+
+### Ledger Integrity, Customers & Pagination (Phase 5)
+- Hardened stock movement ledger: append-only immutability enforced at Mongoose schema level.
+- Wrapped all product creation, stock adjustment, and sale mutations in atomic MongoDB replica-set transactions.
+- Added full Customer management CRUD (`/api/v1/customers`) with due balance tracking and CSV export.
+- Added pagination (`page`, `limit`) and search to products, sales, dues, and customer lists.
+
+### Frontend Quality & Mobile UX (Phase 6)
+- Implemented route-level RBAC middleware enforcing `owner`, `manager`, and `staff` permissions.
+- Added React Error Boundary catching unexpected runtime errors with recovery actions.
+- Added skeleton loading states across all data tables and cards to prevent layout shifts.
+- Built responsive mobile navigation drawer for small screens.
+
+### Health Probes, Disaster Recovery & Marketing Audit (Phase 7)
+- Implemented deep health check probes on `/health` verifying live MongoDB ping and Upstash Redis ping.
+- Audited marketing claims across landing page: verified 14-day trial, annual plan pricing, and accurate Bangladesh payment methods.
+- Built automated Atlas M0 backup and restore utility script (`scripts/backup-restore.sh`).
+
+### Modernization, LTS Upgrades & Repository Hygiene
+- Upgraded outdated dependencies across monorepo to latest stable LTS versions (TypeScript 5.9, Vite 6.4, ESLint 10, Vitest 3.2).
+- Pruned obsolete AI Studio artifacts (`.aistudio`, `metadata.json`, `public/assets/aistudio`, `dev-dist`).
+- Removed unused `@google/genai` dependency and pruned 30 dead transitive packages from `pnpm-lock.yaml`.
+- Added root `.dockerignore` and `apps/api/.dockerignore` to streamline container builds.
+- Hardened CI/CD workflows: deploy workflow gracefully handles unset secrets; added automated Atlas M0 snapshot workflow (`.github/workflows/backup.yml`).
+
+---
+
 ## [1.0.0] - 2026-10-30
 
 ### Core Multi-Tenant Architecture
