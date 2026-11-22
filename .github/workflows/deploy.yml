@@ -20,6 +20,10 @@ jobs:
     steps:
       - name: Trigger Render Free Web Service Deploy Hook
         run: |
+          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" ]; then
+            echo "Error: RENDER_DEPLOY_HOOK_URL secret is not configured!"
+            exit 1
+          fi
           curl -fsSL -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
           echo "Waiting 25s for Render free instance rollout..."
           sleep 25
