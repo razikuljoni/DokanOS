@@ -30,6 +30,21 @@ function generateOpaqueToken(): string {
   return crypto.randomBytes(64).toString('hex');
 }
 
+function hashOpaqueToken(rawToken: string): string {
+  return crypto.createHash('sha256').update(rawToken).digest('hex');
+}
+
+const EMAIL_VERIFICATION_EXPIRY_MS = 24 * 60 * 60 * 1000;
+
+async function sendVerificationEmail(email: string, rawToken: string): Promise<void> {
+  const link = `${env.FRONTEND_URL}/verify-email?token=${encodeURIComponent(rawToken)}&email=${encodeURIComponent(email)}`;
+  await sendResendEmail({
+    to: email,
+    subject: 'Verify your DokanOS email',
+    html: `<p>Verify your DokanOS email address:</p><p><a href="${link}">Verify email</a></p><p>This link expires in 24 hours.</p>`,
+  });
+}
+
 function setRefreshCookie(res: Response, rawToken: string): void {
   res.cookie(REFRESH_COOKIE_NAME, rawToken, {
     httpOnly: true,
@@ -70,6 +85,9 @@ authRouter.post('/register', async (req, res, next) => {
     let createdUserId = new Types.ObjectId();
     let createdTenantId = new Types.ObjectId();
     let slug = slugifyShopName(parsed.shopName);
+    const rawVerificationToken = generateOpaqueToken();
+    const emailVerificationTokenHash = hashOpaqueToken(rawVerificationToken);
+    const emailVerificationExpiresAt = new Date(Date.now() + EMAIL_VERIFICATION_EXPIRY_MS);
 
     await session.withTransaction(async () => {
       const existingSlug = await TenantModel.findOne({ slug }).session(session);
@@ -114,6 +132,9 @@ authRouter.post('/register', async (req, res, next) => {
             role: 'owner',
             tenantId,
             status: 'active',
+            emailVerified: false,
+            emailVerificationTokenHash,
+            emailVerificationExpiresAt,
             lastLoginAt: new Date(),
           },
         ],
@@ -145,6 +166,7 @@ authRouter.post('/register', async (req, res, next) => {
 
     const tenant = await TenantModel.findById(createdTenantId).lean();
     const user = await UserModel.findById(createdUserId).lean();
+    await sendVerificationEmail(parsed.email, rawVerificationToken);
 
     setRefreshCookie(res, rawRefresh);
     res.status(201).json({
@@ -155,6 +177,7 @@ authRouter.post('/register', async (req, res, next) => {
         email: user?.email,
         role: user?.role,
         tenantId: createdTenantId.toString(),
+        emailVerified: user?.emailVerified ?? false,
       },
       tenant: {
         id: tenant?._id.toString(),
@@ -237,6 +260,7 @@ authRouter.post('/login', async (req, res, next) => {
         email: user.email,
         role: user.role,
         tenantId: user.tenantId ? user.tenantId.toString() : null,
+        emailVerified: user.emailVerified,
       },
       tenant: tenant
         ? {
@@ -331,6 +355,7 @@ authRouter.post('/refresh', async (req, res, next) => {
         email: user.email,
         role: user.role,
         tenantId: user.tenantId ? user.tenantId.toString() : null,
+        emailVerified: user.emailVerified,
       },
       tenant: tenant
         ? {
@@ -403,6 +428,47 @@ authRouter.get('/me', requireAuth, async (req, res, next) => {
   }
 });
 
+// GET /api/v1/auth/verify-email
+// The raw token is accepted only transiently; database stores its SHA-256 hash.
+authRouter.get('/verify-email', async (req, res, next) => {
+  try {
+    const rawToken = String(req.query.token ?? '');
+    if (!rawToken) throw AppError.badRequest('Invalid or expired verification link');
+
+    const user = await UserModel.findOne({ emailVerificationTokenHash: hashOpaqueToken(rawToken) });
+    if (!user || !user.emailVerificationExpiresAt || user.emailVerificationExpiresAt.getTime() < Date.now()) {
+      throw AppError.badRequest('Invalid or expired verification link');
+    }
+
+    user.emailVerified = true;
+    user.emailVerificationTokenHash = null;
+    user.emailVerificationExpiresAt = null;
+    await user.save();
+    res.status(200).json({ message: 'Email verified successfully' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/auth/resend-verification
+authRouter.post('/resend-verification', async (req, res, next) => {
+  try {
+    const email = String(req.body?.email ?? '').trim().toLowerCase();
+    if (!email) throw AppError.badRequest('Email is required');
+    const user = await UserModel.findOne({ email });
+    if (user && !user.emailVerified) {
+      const rawToken = generateOpaqueToken();
+      user.emailVerificationTokenHash = hashOpaqueToken(rawToken);
+      user.emailVerificationExpiresAt = new Date(Date.now() + EMAIL_VERIFICATION_EXPIRY_MS);
+      await user.save();
+      await sendVerificationEmail(user.email, rawToken);
+    }
+    res.status(200).json({ message: 'If an account exists, a verification email has been sent' });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/v1/auth/sessions
 authRouter.get('/sessions', requireAuth, async (req, res, next) => {
   try {
@@ -452,9 +518,7 @@ authRouter.post('/accept-invite', async (req, res, next) => {
     const parsed = acceptInviteSchema.parse(req.body);
     const tokenHash = crypto.createHash('sha256').update(parsed.inviteToken).digest('hex');
 
-    const user = await UserModel.findOne({
-      $or: [{ inviteTokenHash: tokenHash }, { inviteToken: parsed.inviteToken }],
-    });
+    const user = await UserModel.findOne({ inviteTokenHash: tokenHash });
 
     if (!user || user.status === 'disabled') {
       throw AppError.badRequest('Invalid or expired invitation token');
@@ -504,6 +568,7 @@ authRouter.post('/accept-invite', async (req, res, next) => {
         email: user.email,
         role: user.role,
         tenantId: user.tenantId ? user.tenantId.toString() : null,
+        emailVerified: user.emailVerified,
       },
       tenant: tenant
         ? {

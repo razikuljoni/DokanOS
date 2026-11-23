@@ -77,6 +77,9 @@ export interface IUser extends Document {
   inviteToken?: string | null;
   inviteTokenHash?: string | null;
   inviteExpiresAt?: Date | null;
+  emailVerified: boolean;
+  emailVerificationTokenHash?: string | null;
+  emailVerificationExpiresAt?: Date | null;
   resetPasswordTokenHash?: string | null;
   resetPasswordExpiresAt?: Date | null;
   lastLoginAt: Date | null;
@@ -92,9 +95,12 @@ const userSchema = new Schema<IUser>(
     role: { type: String, enum: ROLES, required: true },
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', default: null },
     status: { type: String, enum: USER_STATUSES, default: 'active' },
-    inviteToken: { type: String, default: null },
+    inviteToken: { type: String, select: false, default: null },
     inviteTokenHash: { type: String, default: null },
     inviteExpiresAt: { type: Date, default: null },
+    emailVerified: { type: Boolean, default: false },
+    emailVerificationTokenHash: { type: String, default: null },
+    emailVerificationExpiresAt: { type: Date, default: null },
     resetPasswordTokenHash: { type: String, default: null },
     resetPasswordExpiresAt: { type: Date, default: null },
     lastLoginAt: { type: Date, default: null },
@@ -106,6 +112,8 @@ const userSchema = new Schema<IUser>(
         delete ret.passwordHash;
         delete ret.resetPasswordTokenHash;
         delete ret.inviteTokenHash;
+        delete ret.inviteToken;
+        delete ret.emailVerificationTokenHash;
         return ret;
       },
     },
@@ -114,6 +122,7 @@ const userSchema = new Schema<IUser>(
 
 userSchema.index({ tenantId: 1, email: 1 }, { unique: true });
 userSchema.index({ inviteTokenHash: 1 }, { sparse: true });
+userSchema.index({ emailVerificationTokenHash: 1 }, { sparse: true });
 userSchema.index({ resetPasswordTokenHash: 1 }, { sparse: true });
 
 export const UserModel =

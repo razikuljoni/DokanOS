@@ -21,6 +21,7 @@ import {
 } from '../../utils/pagination.js';
 import { recordAuditLog } from '../../utils/audit.js';
 import { env } from '../../config/env.js';
+import { sendResendEmail } from '../notifications/routes.js';
 
 export const usersRouter = Router();
 
@@ -92,7 +93,6 @@ usersRouter.post('/invite', requirePermission('staff:write'), async (req, res, n
       role: parsed.role,
       tenantId: tenantObjectId,
       status: 'invited',
-      inviteToken: rawInviteToken,
       inviteTokenHash,
       inviteExpiresAt,
     });
@@ -118,6 +118,34 @@ usersRouter.post('/invite', requirePermission('staff:write'), async (req, res, n
         setupLink,
       },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/v1/users/:id/resend-invite
+usersRouter.post('/:id/resend-invite', requirePermission('staff:write'), async (req, res, next) => {
+  try {
+    const userObjectId = toObjectIdParam(req.params.id, 'Staff member not found');
+    const target = await UserModel.findOne({
+      _id: userObjectId,
+      tenantId: new Types.ObjectId(req.tenant!.id),
+      status: 'invited',
+    });
+    if (!target) throw AppError.notFound('Pending invitation not found');
+
+    const rawInviteToken = crypto.randomBytes(32).toString('hex');
+    target.inviteTokenHash = crypto.createHash('sha256').update(rawInviteToken).digest('hex');
+    target.inviteExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    await target.save();
+
+    const setupLink = `${env.FRONTEND_URL}/accept-invite?token=${rawInviteToken}&email=${encodeURIComponent(target.email)}`;
+    await sendResendEmail({
+      to: target.email,
+      subject: 'Your DokanOS staff invitation',
+      html: `<p>Complete your staff setup:</p><p><a href="${setupLink}">Accept invitation</a></p>`,
+    });
+    res.status(200).json({ data: { setupLink, email: target.email } });
   } catch (err) {
     next(err);
   }

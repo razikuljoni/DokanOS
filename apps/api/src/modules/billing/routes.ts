@@ -834,6 +834,9 @@ async function handleSslCommerzFail(
   next: import('express').NextFunction,
 ): Promise<void> {
   try {
+    if (req.method === 'POST' && !req.headers.authorization) {
+      throw AppError.unauthorized('Authenticated payment owner or gateway proof required');
+    }
     const tranId = String((req.body as { tran_id?: string })?.tran_id ?? req.query.tran_id ?? '');
     if (!tranId) {
       throw AppError.badRequest('Missing tran_id parameter');
@@ -870,6 +873,9 @@ async function handleSslCommerzCancel(
   next: import('express').NextFunction,
 ): Promise<void> {
   try {
+    if (req.method === 'POST' && !req.headers.authorization) {
+      throw AppError.unauthorized('Authenticated payment owner or gateway proof required');
+    }
     const tranId = String((req.body as { tran_id?: string })?.tran_id ?? req.query.tran_id ?? '');
     if (!tranId) {
       throw AppError.badRequest('Missing tran_id parameter');

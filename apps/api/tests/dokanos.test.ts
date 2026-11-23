@@ -1485,6 +1485,90 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
     expect(replayAccept.status).toBe(400);
   });
 
+  it('Phase 2: invite tokens are hash-only and resend rotates the setup link', async () => {
+    const shop = await registerShop({
+      shopName: 'Invite Hash Shop',
+      email: 'owner@invite-hash.bd',
+    });
+
+    const inviteRes = await request(app)
+      .post('/api/v1/users/invite')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({ name: 'Hash Staff', email: 'hash-staff@invite-hash.bd', role: 'staff' });
+    expect(inviteRes.status).toBe(201);
+    const firstToken = new URL(inviteRes.body.data.setupLink).searchParams.get('token');
+    expect(firstToken).toBeTruthy();
+
+    const invited = await UserModel.findOne({ email: 'hash-staff@invite-hash.bd' }).select(
+      '+inviteToken',
+    );
+    expect(invited?.inviteToken).toBeNull();
+    expect(invited?.inviteTokenHash).toBeDefined();
+
+    const resendRes = await request(app)
+      .post(`/api/v1/users/${invited!._id.toString()}/resend-invite`)
+      .set('Authorization', `Bearer ${shop.accessToken}`);
+    expect(resendRes.status).toBe(200);
+    const secondToken = new URL(resendRes.body.data.setupLink).searchParams.get('token');
+    expect(secondToken).toBeTruthy();
+    expect(secondToken).not.toBe(firstToken);
+
+    const oldAccept = await request(app)
+      .post('/api/v1/auth/accept-invite')
+      .send({ inviteToken: firstToken, password: 'ChosenPassword123!' });
+    expect(oldAccept.status).toBe(400);
+
+    const rawFallbackUser = await UserModel.findOne({ email: 'hash-staff@invite-hash.bd' });
+    rawFallbackUser!.inviteToken = secondToken;
+    rawFallbackUser!.inviteTokenHash = null;
+    await rawFallbackUser!.save();
+    const rawFallbackAccept = await request(app)
+      .post('/api/v1/auth/accept-invite')
+      .send({ inviteToken: secondToken, password: 'ChosenPassword123!' });
+    expect(rawFallbackAccept.status).toBe(400);
+  });
+
+  it('Phase 2: unverified owners cannot change tenant settings until verified', async () => {
+    const shop = await registerShop({ shopName: 'Verify Gate Shop', email: 'owner@verify-gate.bd' });
+
+    const blocked = await request(app)
+      .patch('/api/v1/tenants/me')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({ name: 'Blocked Shop' });
+    expect(blocked.status).toBe(403);
+    expect(blocked.body.error.message).toContain('verify your email');
+
+    await UserModel.updateOne({ _id: shop.userId }, { $set: { emailVerified: true } });
+    const allowed = await request(app)
+      .patch('/api/v1/tenants/me')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({ name: 'Verified Shop' });
+    expect(allowed.status).toBe(200);
+    expect(allowed.body.data.name).toBe('Verified Shop');
+  });
+
+  it('Phase 2: unauthenticated SSLCommerz fail and cancel callbacks cannot mutate payment', async () => {
+    const shop = await registerShop({ shopName: 'Callback Guard Shop', email: 'owner@callback-guard.bd' });
+    const initRes = await request(app)
+      .post('/api/v1/billing/sslcommerz/init')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({});
+    expect(initRes.status).toBe(201);
+    const tranId = initRes.body.data.tranId as string;
+
+    const failRes = await request(app)
+      .post('/api/v1/billing/sslcommerz/fail')
+      .send({ tran_id: tranId });
+    expect(failRes.status).toBe(401);
+    expect((await PaymentModel.findOne({ eventId: tranId }))?.status).toBe('pending');
+
+    const cancelRes = await request(app)
+      .post('/api/v1/billing/sslcommerz/cancel')
+      .send({ tran_id: tranId });
+    expect(cancelRes.status).toBe(401);
+    expect((await PaymentModel.findOne({ eventId: tranId }))?.status).toBe('pending');
+  });
+
   // 25. Phase 4 — Tenant Login Isolation & Wrong Slug 404 (H3)
   it('25. Phase 4 Tenant Isolation: Login with nonexistent tenantSlug returns 404 Shop Not Found', async () => {
     await registerShop({

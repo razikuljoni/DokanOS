@@ -59,6 +59,7 @@ export function StaffPage(): React.ReactElement {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<'manager' | 'staff'>('staff');
   const [lastSetupLink, setLastSetupLink] = useState<string | null>(null);
+  const [lastInviteUserId, setLastInviteUserId] = useState<string | null>(null);
 
   const { data: usersRes, isLoading } = useQuery({
     queryKey: ['users', tenant?.id],
@@ -79,6 +80,7 @@ export function StaffPage(): React.ReactElement {
       setName('');
       setEmail('');
       setLastSetupLink(res.data.setupLink);
+      setLastInviteUserId(res.data._id);
       void queryClient.invalidateQueries({ queryKey: ['users', tenant?.id] });
       addToast({
         title: 'Staff Invited',
@@ -92,6 +94,22 @@ export function StaffPage(): React.ReactElement {
         description: err instanceof Error ? err.message : 'Check plan staff limits',
         variant: 'danger',
       });
+    },
+  });
+
+  const resendInviteMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      return apiFetch<{ data: { setupLink: string; email: string } }>(
+        `/api/v1/users/${userId}/resend-invite`,
+        { method: 'POST' },
+      );
+    },
+    onSuccess: (res) => {
+      setLastSetupLink(res.data.setupLink);
+      addToast({ title: 'Invite Resent', description: `New setup link for ${res.data.email}`, variant: 'success' });
+    },
+    onError: (err) => {
+      addToast({ title: 'Resend Failed', description: formatErrorMessage(err), variant: 'danger' });
     },
   });
 
@@ -306,9 +324,33 @@ export function StaffPage(): React.ReactElement {
               </Button>
 
               {lastSetupLink && (
-                <div className="p-3 rounded-md border border-border bg-secondary/50 space-y-1 text-xs">
+                <div className="p-3 rounded-md border border-border bg-secondary/50 space-y-2 text-xs">
                   <div className="font-semibold text-primary">One-Time Setup Link Ready:</div>
                   <div className="font-mono break-all text-muted-foreground">{lastSetupLink}</div>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="flex-1 text-xs"
+                      onClick={() => { void navigator.clipboard.writeText(lastSetupLink); addToast({ title: 'Link copied', variant: 'success' }); }}
+                    >
+                      Copy Link
+                    </Button>
+                    {lastInviteUserId && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 text-xs"
+                        disabled={resendInviteMutation.isPending}
+                        onClick={() => resendInviteMutation.mutate(lastInviteUserId)}
+                      >
+                        <RefreshCw className="h-3 w-3 mr-1" />
+                        Resend
+                      </Button>
+                    )}
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -454,6 +496,7 @@ export function SettingsPage(): React.ReactElement {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'manager' | 'staff'>('staff');
   const [lastSetupLink, setLastSetupLink] = useState<string | null>(null);
+  const [lastInviteUserId, setLastInviteUserId] = useState<string | null>(null);
   const [showAllPermissions, setShowAllPermissions] = useState(false);
 
   // Change Password state
@@ -650,6 +693,7 @@ export function SettingsPage(): React.ReactElement {
       setInviteName('');
       setInviteEmail('');
       setLastSetupLink(res.data.setupLink);
+      setLastInviteUserId(res.data._id);
       void queryClient.invalidateQueries({ queryKey: ['users', tenant?.id] });
       void queryClient.invalidateQueries({ queryKey: ['tenant-usage', tenant?.id] });
       void queryClient.invalidateQueries({ queryKey: ['tenant-audit-logs', tenant?.id] });
@@ -665,6 +709,23 @@ export function SettingsPage(): React.ReactElement {
         description: formatErrorMessage(err),
         variant: 'danger',
       });
+    },
+  });
+
+  // PATCH /api/v1/users/:id/resend-invite
+  const resendInviteMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      return apiFetch<{ data: { setupLink: string; email: string } }>(
+        `/api/v1/users/${userId}/resend-invite`,
+        { method: 'POST' },
+      );
+    },
+    onSuccess: (res) => {
+      setLastSetupLink(res.data.setupLink);
+      addToast({ title: 'Invite Resent', description: `New setup link for ${res.data.email}`, variant: 'success' });
+    },
+    onError: (err) => {
+      addToast({ title: 'Resend Failed', description: formatErrorMessage(err), variant: 'danger' });
     },
   });
 
@@ -1433,10 +1494,34 @@ export function SettingsPage(): React.ReactElement {
             </Button>
 
             {lastSetupLink && (
-              <div className="rounded-lg border border-primary/30 bg-primary/10 p-3 space-y-1 text-xs">
+              <div className="rounded-lg border border-primary/30 bg-primary/10 p-3 space-y-2 text-xs">
                 <div className="font-semibold text-primary">One-Time Setup Link Generated:</div>
                 <div className="font-mono text-[11px] break-all text-foreground">
                   {lastSetupLink}
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="flex-1 text-xs"
+                    onClick={() => { void navigator.clipboard.writeText(lastSetupLink); addToast({ title: 'Link copied', variant: 'success' }); }}
+                  >
+                    Copy Link
+                  </Button>
+                  {lastInviteUserId && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="flex-1 text-xs"
+                      disabled={resendInviteMutation.isPending}
+                      onClick={() => resendInviteMutation.mutate(lastInviteUserId)}
+                    >
+                      <RefreshCw className="h-3 w-3 mr-1" />
+                      Resend
+                    </Button>
+                  )}
                 </div>
               </div>
             )}
