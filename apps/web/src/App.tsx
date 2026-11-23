@@ -16,44 +16,72 @@ import {
   ResetPasswordPage,
 } from '@/routes/AuthPages';
 
-const DashboardPage = lazy(() =>
+const DashboardPage = lazyWithReload(() =>
   import('@/routes/DashboardPage').then((m) => ({ default: m.DashboardPage })),
 );
-const PosPage = lazy(() => import('@/routes/PosPage').then((m) => ({ default: m.PosPage })));
-const SalesListPage = lazy(() =>
+const PosPage = lazyWithReload(() =>
+  import('@/routes/PosPage').then((m) => ({ default: m.PosPage })),
+);
+const SalesListPage = lazyWithReload(() =>
   import('@/routes/SalesListPage').then((m) => ({ default: m.SalesListPage })),
 );
-const CustomersPage = lazy(() =>
+const CustomersPage = lazyWithReload(() =>
   import('@/routes/CustomersPages').then((m) => ({ default: m.CustomersPage })),
 );
-const ProductsListPage = lazy(() =>
+const ProductsListPage = lazyWithReload(() =>
   import('@/routes/ProductsPages').then((m) => ({ default: m.ProductsListPage })),
 );
-const ProductDetailPage = lazy(() =>
+const ProductDetailPage = lazyWithReload(() =>
   import('@/routes/ProductsPages').then((m) => ({ default: m.ProductDetailPage })),
 );
-const PurchasesPage = lazy(() =>
+const PurchasesPage = lazyWithReload(() =>
   import('@/routes/PurchasesAndSuppliersPages').then((m) => ({ default: m.PurchasesPage })),
 );
-const SuppliersPage = lazy(() =>
+const SuppliersPage = lazyWithReload(() =>
   import('@/routes/PurchasesAndSuppliersPages').then((m) => ({ default: m.SuppliersPage })),
 );
-const DuesPage = lazy(() => import('@/routes/DuesPage').then((m) => ({ default: m.DuesPage })));
-const AlertsPage = lazy(() =>
+const DuesPage = lazyWithReload(() =>
+  import('@/routes/DuesPage').then((m) => ({ default: m.DuesPage })),
+);
+const AlertsPage = lazyWithReload(() =>
   import('@/routes/AlertsAndBillingPages').then((m) => ({ default: m.AlertsPage })),
 );
-const BillingPage = lazy(() =>
+const BillingPage = lazyWithReload(() =>
   import('@/routes/AlertsAndBillingPages').then((m) => ({ default: m.BillingPage })),
 );
-const SettingsPage = lazy(() =>
+const SettingsPage = lazyWithReload(() =>
   import('@/routes/StaffAndSettingsPages').then((m) => ({ default: m.SettingsPage })),
 );
-const StaffPage = lazy(() =>
+const StaffPage = lazyWithReload(() =>
   import('@/routes/StaffAndSettingsPages').then((m) => ({ default: m.StaffPage })),
 );
 
 function RouteLoading(): React.ReactElement {
   return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+}
+
+function VersionUpdatePage(): React.ReactElement {
+  return (
+    <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-6 text-center">
+      <div className="max-w-md w-full space-y-4">
+        <h1 className="font-display text-2xl font-bold">A new version is available</h1>
+        <p className="text-sm text-muted-foreground">Please reload to continue.</p>
+        <Button onClick={() => window.location.reload()}>Reload</Button>
+      </div>
+    </div>
+  );
+}
+
+function lazyWithReload<T extends React.ComponentType>(
+  load: () => Promise<{ default: T }>,
+): React.LazyExoticComponent<T> {
+  return lazy(async () => {
+    try {
+      return await load();
+    } catch {
+      return { default: VersionUpdatePage as unknown as T };
+    }
+  });
 }
 
 const queryClient = new QueryClient({
@@ -86,8 +114,9 @@ function RbacGuard({
           Access Restricted
         </h2>
         <p className="text-xs text-muted-foreground leading-relaxed">
-          Your account role (<span className="font-semibold text-foreground">{user.role}</span>) does
-          not have permission to access this section (<span className="font-mono">{permission}</span>).
+          Your account role (<span className="font-semibold text-foreground">{user.role}</span>)
+          does not have permission to access this section (
+          <span className="font-mono">{permission}</span>).
         </p>
         <div className="pt-2">
           <Link to="/app/dashboard">
@@ -116,9 +145,7 @@ function NotFoundPage(): React.ReactElement {
       <div className="max-w-md w-full space-y-4">
         <div className="font-mono text-6xl font-black text-primary">404</div>
         <h1 className="font-display text-2xl font-bold">Page Not Found</h1>
-        <p className="text-xs text-muted-foreground">
-          The requested ledger route does not exist.
-        </p>
+        <p className="text-xs text-muted-foreground">The requested ledger route does not exist.</p>
         <div className="pt-2 flex justify-center gap-2">
           {accessToken ? (
             <Link to="/app/dashboard">
