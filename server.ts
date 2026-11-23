@@ -37,9 +37,35 @@ async function startDevBridge(): Promise<void> {
     app.use(vite.middlewares);
   } else {
     const distPath = path.resolve(process.cwd(), 'apps/web/dist');
-    app.use(express.static(distPath));
-    app.get('*all', (_req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+    app.use(
+      express.static(distPath, {
+        setHeaders: (res, filePath) => {
+          if (path.basename(filePath) === 'index.html') {
+            res.setHeader('Cache-Control', 'no-cache');
+          } else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          }
+        },
+      }),
+    );
+    app.get('*all', (req, res, next) => {
+      if (req.path.startsWith('/assets/')) {
+        next();
+        return;
+      }
+
+      if (
+        req.path === '/' ||
+        /^\/(?:app(?:\/|$)|login|register|forgot-password|reset-password|accept-invite)(?:\/|$)/.test(
+          req.path,
+        )
+      ) {
+        res.setHeader('Cache-Control', 'no-cache');
+        res.sendFile(path.join(distPath, 'index.html'));
+        return;
+      }
+
+      next();
     });
   }
 
