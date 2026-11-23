@@ -84,6 +84,10 @@ export function PurchasesPage(): React.ReactElement {
 
   const suppliers = suppliersRes?.data ?? [];
   const products = productsRes?.data ?? [];
+  const selectedProduct = products.find(
+    (product) => product._id === (productId || products[0]?._id),
+  );
+  const costPriceChanged = Boolean(selectedProduct && costPrice !== selectedProduct.costPrice);
 
   const createPurchaseMutation = useMutation({
     mutationFn: async () => {
@@ -279,6 +283,13 @@ export function PurchasesPage(): React.ReactElement {
                 </div>
               </div>
 
+              {costPriceChanged && selectedProduct && (
+                <div className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
+                  This will change the cost price from {formatBDT(selectedProduct.costPrice)} to{' '}
+                  {formatBDT(costPrice)}.
+                </div>
+              )}
+
               <div className="space-y-1">
                 <Label htmlFor="po-paid">
                   Amount Paid Now (৳) — Total Bill: {formatBDT(qty * costPrice)}
@@ -314,7 +325,18 @@ export function PurchasesPage(): React.ReactElement {
                   (!supplierId && suppliers.length === 0) ||
                   (!productId && products.length === 0)
                 }
-                onClick={() => createPurchaseMutation.mutate()}
+                onClick={() => {
+                  if (
+                    costPriceChanged &&
+                    selectedProduct &&
+                    !window.confirm(
+                      `This will change the cost price from ${formatBDT(selectedProduct.costPrice)} to ${formatBDT(costPrice)}. Continue?`,
+                    )
+                  ) {
+                    return;
+                  }
+                  createPurchaseMutation.mutate();
+                }}
               >
                 {createPurchaseMutation.isPending ? 'Receiving...' : 'Receive & Update Stock'}
               </Button>
@@ -493,9 +515,7 @@ export function SuppliersPage(): React.ReactElement {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-display text-2xl font-bold tracking-tight">
-          Suppliers & Distributors
-        </h1>
+        <h1 className="font-display text-2xl font-bold tracking-tight">Suppliers & Distributors</h1>
         <p className="text-xs text-muted-foreground">
           Manage pharmaceutical and wholesale distributors and track outstanding supplier Baki.
         </p>
@@ -551,7 +571,9 @@ export function SuppliersPage(): React.ReactElement {
                 className="w-full"
                 size="sm"
                 disabled={
-                  createSupplierMutation.isPending || name.trim().length < 2 || phone.trim().length < 6
+                  createSupplierMutation.isPending ||
+                  name.trim().length < 2 ||
+                  phone.trim().length < 6
                 }
                 onClick={() => createSupplierMutation.mutate()}
               >
@@ -606,11 +628,7 @@ export function SuppliersPage(): React.ReactElement {
                 />
               </div>
               <div className="flex justify-end gap-2 pt-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setEditingSupplier(null)}
-                >
+                <Button variant="outline" size="sm" onClick={() => setEditingSupplier(null)}>
                   Cancel
                 </Button>
                 <Button

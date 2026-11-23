@@ -1644,8 +1644,98 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
     expect(foreignSupPatch.body.error.message).toContain('Supplier not found in this shop');
   });
 
-  // 29. Phase 5 — Purchase Cost Change Audit
-  it('29. Phase 5 Purchase Cost Audit: cost price changes trigger product.cost_changed audit log and purchase.created', async () => {
+it("29. Product edit excludes stock while direct stock PATCH remains rejected", async () => {
+  const shop = await registerShop({
+    shopName: "Product Edit Shop",
+    email: "product-edit@dokanos.bd",
+  });
+  const productRes = await request(app)
+    .post("/api/v1/products")
+    .set("Authorization", `Bearer ${shop.accessToken}`)
+    .send({
+      name: "Edit Me",
+      category: "General",
+      unit: "pcs",
+      costPrice: 10,
+      sellPrice: 15,
+      stock: 5,
+      sku: "EDIT-ME",
+    });
+  expect(productRes.status).toBe(201);
+  const productId = productRes.body.data._id as string;
+
+  const editRes = await request(app)
+    .patch(`/api/v1/products/${productId}`)
+    .set("Authorization", `Bearer ${shop.accessToken}`)
+    .send({ sellPrice: 18 });
+  expect(editRes.status).toBe(200);
+  expect(editRes.body.data.sellPrice).toBe(18);
+  expect((await ProductModel.findById(productId))?.stock).toBe(5);
+
+  const stockRes = await request(app)
+    .patch(`/api/v1/products/${productId}`)
+    .set("Authorization", `Bearer ${shop.accessToken}`)
+    .send({ stock: 99 });
+  expect(stockRes.status).toBe(400);
+  expect((await ProductModel.findById(productId))?.stock).toBe(5);
+});
+
+it("30. Partial returns accumulate, restock returned quantities, and mark fully returned only at completion", async () => {
+  const shop = await registerShop({
+    shopName: "Returns Shop",
+    email: "returns@dokanos.bd",
+  });
+  const productRes = await request(app)
+    .post("/api/v1/products")
+    .set("Authorization", `Bearer ${shop.accessToken}`)
+    .send({
+      name: "Return Product",
+      category: "General",
+      unit: "pcs",
+      costPrice: 10,
+      sellPrice: 20,
+      stock: 2,
+      sku: "RETURN-001",
+    });
+  const productId = productRes.body.data._id as string;
+  const saleRes = await request(app)
+    .post("/api/v1/sales")
+    .set("Authorization", `Bearer ${shop.accessToken}`)
+    .send({
+      items: [{ productId, qty: 2 }],
+      paymentMethod: "cash",
+      paidAmount: 40,
+    });
+  expect(saleRes.status).toBe(201);
+  const saleId = saleRes.body.data._id as string;
+
+  const firstReturn = await request(app)
+    .post(`/api/v1/sales/${saleId}/return`)
+    .set("Authorization", `Bearer ${shop.accessToken}`)
+    .send({ items: [{ productId, qty: 1 }] });
+  expect(firstReturn.status).toBe(200);
+  expect(firstReturn.body.data.isReturned).toBe(false);
+  expect(firstReturn.body.data.items[0].returnedQty).toBe(1);
+  expect((await ProductModel.findById(productId))?.stock).toBe(1);
+
+  const secondReturn = await request(app)
+    .post(`/api/v1/sales/${saleId}/return`)
+    .set("Authorization", `Bearer ${shop.accessToken}`)
+    .send({ items: [{ productId, qty: 1 }] });
+  expect(secondReturn.status).toBe(200);
+  expect(secondReturn.body.data.isReturned).toBe(true);
+  expect(secondReturn.body.data.items[0].returnedQty).toBe(2);
+  expect((await ProductModel.findById(productId))?.stock).toBe(2);
+
+  const overReturn = await request(app)
+    .post(`/api/v1/sales/${saleId}/return`)
+    .set("Authorization", `Bearer ${shop.accessToken}`)
+    .send({ items: [{ productId, qty: 1 }] });
+  expect(overReturn.status).toBe(400);
+});
+
+  // 31. Phase 5 — Purchase Cost Change Audit
+  it('31. Phase 5 Purchase Cost Audit: cost price changes trigger product.cost_changed audit log and purchase.created', async () => {
     const shop = await registerShop({
       shopName: 'Purchase Audit Shop',
       email: 'purchaseaudit@dokanos.bd',

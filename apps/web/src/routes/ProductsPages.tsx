@@ -69,8 +69,16 @@ export function ProductsListPage(): React.ReactElement {
   );
 
   const { data, isLoading } = useQuery({
-    queryKey: ['products', tenant?.id, { page, search, stockStatus, mode: isOffline ? 'offline' : 'online' }],
-    queryFn: async (): Promise<{ data: ProductRow[]; meta?: PaginationMeta; fromCache?: boolean }> => {
+    queryKey: [
+      'products',
+      tenant?.id,
+      { page, search, stockStatus, mode: isOffline ? 'offline' : 'online' },
+    ],
+    queryFn: async (): Promise<{
+      data: ProductRow[];
+      meta?: PaginationMeta;
+      fromCache?: boolean;
+    }> => {
       if (!tenant?.id) return { data: [] };
 
       if (isOffline) {
@@ -169,9 +177,10 @@ export function ProductsListPage(): React.ReactElement {
   const onSaveProduct = async (values: CreateProductInput): Promise<void> => {
     try {
       if (editingProduct) {
+        const { stock: _stock, ...editableFields } = values;
         await apiFetch(`/api/v1/products/${editingProduct._id}`, {
           method: 'PATCH',
-          body: JSON.stringify(values),
+          body: JSON.stringify(editableFields),
         });
         addToast({ title: 'Product Updated', description: values.name, variant: 'success' });
       } else {
@@ -251,7 +260,11 @@ export function ProductsListPage(): React.ReactElement {
   const handleImportCsv = async (): Promise<void> => {
     try {
       const res = await apiFetch<{
-        data: { importedCount: number; totalRows: number; errors: Array<{ row: number; message: string }> };
+        data: {
+          importedCount: number;
+          totalRows: number;
+          errors: Array<{ row: number; message: string }>;
+        };
       }>('/api/v1/products/import', {
         method: 'POST',
         body: JSON.stringify({ csv: csvContent }),
@@ -326,11 +339,7 @@ export function ProductsListPage(): React.ReactElement {
         return (
           <span
             className={`font-mono font-semibold tabular-nums ${
-              row.stock === 0
-                ? 'text-destructive'
-                : isLow
-                  ? 'text-warning'
-                  : 'text-foreground'
+              row.stock === 0 ? 'text-destructive' : isLow ? 'text-warning' : 'text-foreground'
             }`}
           >
             {row.stock} {row.unit}
@@ -373,7 +382,8 @@ export function ProductsListPage(): React.ReactElement {
             Products & Stock Ledger
           </h1>
           <p className="text-xs text-muted-foreground">
-            Per-tenant SKU inventory with reorder thresholds and append-only stock movement tracking.
+            Per-tenant SKU inventory with reorder thresholds and append-only stock movement
+            tracking.
           </p>
         </div>
 
@@ -499,18 +509,14 @@ export function ProductsListPage(): React.ReactElement {
                 <div className="space-y-1.5">
                   <Label htmlFor="p-name">Product Name</Label>
                   <Input id="p-name" {...register('name')} />
-                  {errors.name && (
-                    <p className="text-xs text-destructive">{errors.name.message}</p>
-                  )}
+                  {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
                     <Label htmlFor="p-sku">SKU (Unique per shop)</Label>
                     <Input id="p-sku" {...register('sku')} className="font-mono" />
-                    {errors.sku && (
-                      <p className="text-xs text-destructive">{errors.sku.message}</p>
-                    )}
+                    {errors.sku && <p className="text-xs text-destructive">{errors.sku.message}</p>}
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="p-category">Category</Label>
@@ -814,11 +820,7 @@ export function ProductDetailPage(): React.ReactElement {
                   <Label htmlFor="adj-note" className="text-xs">
                     Audit Note (Required)
                   </Label>
-                  <Input
-                    id="adj-note"
-                    value={note}
-                    onChange={(e) => setNote(e.target.value)}
-                  />
+                  <Input id="adj-note" value={note} onChange={(e) => setNote(e.target.value)} />
                 </div>
                 <Button
                   size="sm"

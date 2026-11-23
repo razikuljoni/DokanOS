@@ -243,6 +243,7 @@ export interface ISaleItem {
   price: number;
   costPrice: number;
   lineTotal: number;
+  returnedQty: number;
 }
 
 export interface ISale extends Document {
@@ -275,6 +276,7 @@ const saleItemSchema = new Schema<ISaleItem>(
     price: { type: Number, required: true, min: 0 },
     costPrice: { type: Number, required: true, min: 0, default: 0 },
     lineTotal: { type: Number, required: true, min: 0 },
+    returnedQty: { type: Number, required: true, min: 0, default: 0 },
   },
   { _id: false },
 );
