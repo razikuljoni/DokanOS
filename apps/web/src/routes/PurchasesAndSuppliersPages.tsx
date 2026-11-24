@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Edit2, Plus, Trash2, Truck, X } from 'lucide-react';
+import { Edit2, Eye, Plus, Trash2, Truck, X } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useUiStore } from '@/stores/uiStore';
 import { apiFetch } from '@/lib/api';
@@ -361,11 +361,24 @@ export function SuppliersPage(): React.ReactElement {
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editAddress, setEditAddress] = useState('');
+  const [viewingSupplier, setViewingSupplier] = useState<SupplierRow | null>(null);
 
   const { data: suppliersRes, isLoading } = useQuery({
     queryKey: ['suppliers', tenant?.id],
     queryFn: () => apiFetch<{ data: SupplierRow[] }>('/api/v1/suppliers'),
     enabled: Boolean(tenant?.id),
+  });
+
+  const {
+    data: supplierPurchasesRes,
+    isLoading: isSupplierPurchasesLoading,
+  } = useQuery({
+    queryKey: ['supplier-purchases', tenant?.id, viewingSupplier?._id],
+    queryFn: () =>
+      apiFetch<{ data: PurchaseRow[] }>(
+        `/api/v1/purchases?supplierId=${encodeURIComponent(viewingSupplier!._id)}&limit=20`,
+      ),
+    enabled: Boolean(tenant?.id && viewingSupplier),
   });
 
   const createSupplierMutation = useMutation({
@@ -416,6 +429,53 @@ export function SuppliersPage(): React.ReactElement {
       });
     },
   });
+
+  const purchaseHistoryColumns: DataTableColumn<PurchaseRow>[] = [
+    {
+      key: 'po',
+      header: 'Purchase Ref',
+      render: (row) => (
+        <span className="font-mono text-xs font-semibold">PO-{row._id.slice(-6).toUpperCase()}</span>
+      ),
+    },
+    {
+      key: 'date',
+      header: 'Date',
+      render: (row) => (
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {formatDateDhaka(row.receivedAt)}
+        </span>
+      ),
+    },
+    {
+      key: 'total',
+      header: 'Total (BDT)',
+      align: 'right',
+      render: (row) => <span className="font-mono tabular-nums">{formatBDT(row.total)}</span>,
+    },
+    {
+      key: 'paid',
+      header: 'Paid (BDT)',
+      align: 'right',
+      render: (row) => (
+        <span className="font-mono tabular-nums">{formatBDT(row.paidAmount)}</span>
+      ),
+    },
+    {
+      key: 'due',
+      header: 'Due (BDT)',
+      align: 'right',
+      render: (row) => (
+        <span
+          className={`font-mono font-semibold tabular-nums ${
+            row.dueAmount > 0 ? 'text-warning' : 'text-primary'
+          }`}
+        >
+          {row.dueAmount > 0 ? formatBDT(row.dueAmount) : 'Settled'}
+        </span>
+      ),
+    },
+  ];
 
   const deleteSupplierMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -477,6 +537,18 @@ export function SuppliersPage(): React.ReactElement {
       align: 'right',
       render: (row) => (
         <div className="flex items-center justify-end gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            title="View Supplier Details & History"
+            onClick={(e) => {
+              e.stopPropagation();
+              setViewingSupplier(row);
+            }}
+          >
+            <Eye className="h-3.5 w-3.5" />
+          </Button>
           <Button
             variant="ghost"
             size="sm"
@@ -643,6 +715,51 @@ export function SuppliersPage(): React.ReactElement {
                   {updateSupplierMutation.isPending ? 'Saving...' : 'Update Supplier'}
                 </Button>
               </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {viewingSupplier && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <Card className="w-full max-w-2xl shadow-2xl border-border max-h-[85vh] flex flex-col">
+            <CardHeader className="flex flex-row items-center justify-between pb-3 space-y-0 border-b shrink-0">
+              <div>
+                <CardTitle className="text-lg font-semibold">{viewingSupplier.name}</CardTitle>
+                <CardDescription>
+                  {viewingSupplier.phone}
+                  {viewingSupplier.address ? ` · ${viewingSupplier.address}` : ''} · Outstanding
+                  Baki {formatBDT(viewingSupplier.totalDue)}
+                </CardDescription>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => setViewingSupplier(null)}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </CardHeader>
+            <CardContent className="pt-4 overflow-y-auto">
+              {isSupplierPurchasesLoading ? (
+                <div className="py-8 text-center text-sm text-muted-foreground">
+                  Loading supplier purchase history...
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <h3 className="text-xs font-semibold uppercase text-muted-foreground">
+                    Recent Purchases ({supplierPurchasesRes?.data.length ?? 0})
+                  </h3>
+                  <DataTable
+                    columns={purchaseHistoryColumns}
+                    data={supplierPurchasesRes?.data ?? []}
+                    rowKey={(r) => r._id}
+                    emptyTitle="No purchases yet"
+                    emptyDescription="This supplier has no recorded purchase orders."
+                  />
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
