@@ -153,7 +153,7 @@ export function OfflineSyncHeaderControls(): React.ReactElement {
           <>
             <Wifi className="h-3.5 w-3.5 text-primary" />
             <span className="hidden xl:inline">Online · {cachedProductsCount} Cached</span>
-            <span className="xl:hidden">Online</span>
+            <span className="hidden sm:inline xl:hidden">Online</span>
           </>
         )}
       </button>
@@ -163,7 +163,7 @@ export function OfflineSyncHeaderControls(): React.ReactElement {
         type="button"
         onClick={() => setDrawerOpen(true)}
         title="Inspect Local Cache & Offline Sync Outbox"
-        className={`relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-xs font-mono tabular-nums transition-colors cursor-pointer ${
+        className={`relative flex items-center gap-1.5 px-2 py-1.5 rounded-md border text-xs font-mono tabular-nums transition-colors cursor-pointer ${
           outboxItems.length > 0
             ? 'border-primary bg-primary text-white'
             : 'border-border bg-card hover:bg-secondary text-foreground'
@@ -172,9 +172,9 @@ export function OfflineSyncHeaderControls(): React.ReactElement {
         {isSyncing ? (
           <RefreshCw className="h-3.5 w-3.5 animate-spin" />
         ) : (
-          <Database className="h-3.5 w-3.5" />
+          <Database className="h-3.5 w-3.5 text-primary" />
         )}
-        <span className="hidden sm:inline">Outbox</span>
+        <span className="hidden md:inline">Outbox</span>
         <span>({outboxItems.length})</span>
       </button>
     </div>
@@ -249,7 +249,9 @@ export function OfflineBannerAndDrawer(): React.ReactElement {
             {isOffline ? (
               <CloudOff className="h-4 w-4 text-warning shrink-0" />
             ) : (
-              <RefreshCw className={`h-4 w-4 text-primary shrink-0 ${isSyncing ? 'animate-spin' : ''}`} />
+              <RefreshCw
+                className={`h-4 w-4 text-primary shrink-0 ${isSyncing ? 'animate-spin' : ''}`}
+              />
             )}
             <span>
               {isOffline ? (

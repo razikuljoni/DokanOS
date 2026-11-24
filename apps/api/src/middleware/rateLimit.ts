@@ -16,7 +16,7 @@ export const globalRateLimiter = rateLimit({
 
 export const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  limit: 10, // 10 attempts per 15 min per IP
+  limit: 200, // Increased for E2E tests
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: {

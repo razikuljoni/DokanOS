@@ -34,10 +34,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PlanBadge } from '@/components/SharedWidgets';
 import { PWAInstallButton } from '@/lib/usePWAInstall';
-import {
-  OfflineBannerAndDrawer,
-  OfflineSyncHeaderControls,
-} from '@/components/OfflineSyncManager';
+import { OfflineBannerAndDrawer, OfflineSyncHeaderControls } from '@/components/OfflineSyncManager';
 import { cn } from '@/lib/utils';
 
 interface NavItem {
@@ -296,51 +293,52 @@ export function AppShell(): React.ReactElement {
         {/* Demo RBAC Quick Switcher & User Footer */}
         {!sidebarCollapsed && (
           <div className="p-3 border-t border-[#2E2A26] space-y-3 text-xs">
-            {(import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEMO_LOGIN === 'true') && user?.email.endsWith('@dokan-os.demo') && (
-              <div className="space-y-1.5">
-                <div className="text-[11px] text-[#A8A29E] font-medium">
-                  Demo RBAC Role Switcher
+            {(import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEMO_LOGIN === 'true') &&
+              user?.email.endsWith('@dokan-os.demo') && (
+                <div className="space-y-1.5">
+                  <div className="text-[11px] text-[#A8A29E] font-medium">
+                    Demo RBAC Role Switcher
+                  </div>
+                  <div className="grid grid-cols-3 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => void handleSwitchDemoRole('demo@dokan-os.demo', 'Owner')}
+                      className={cn(
+                        'px-2 py-1 rounded text-[11px] font-medium cursor-pointer transition-colors',
+                        user.role === 'owner'
+                          ? 'bg-[#14532D] text-white'
+                          : 'bg-[#292524] text-[#D6D3D1] hover:text-white',
+                      )}
+                    >
+                      Owner
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleSwitchDemoRole('manager@dokan-os.demo', 'Manager')}
+                      className={cn(
+                        'px-2 py-1 rounded text-[11px] font-medium cursor-pointer transition-colors',
+                        user.role === 'manager'
+                          ? 'bg-[#14532D] text-white'
+                          : 'bg-[#292524] text-[#D6D3D1] hover:text-white',
+                      )}
+                    >
+                      Manager
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleSwitchDemoRole('staff@dokan-os.demo', 'Staff')}
+                      className={cn(
+                        'px-2 py-1 rounded text-[11px] font-medium cursor-pointer transition-colors',
+                        user.role === 'staff'
+                          ? 'bg-[#14532D] text-white'
+                          : 'bg-[#292524] text-[#D6D3D1] hover:text-white',
+                      )}
+                    >
+                      Staff
+                    </button>
+                  </div>
                 </div>
-                <div className="grid grid-cols-3 gap-1">
-                  <button
-                    type="button"
-                    onClick={() => void handleSwitchDemoRole('demo@dokan-os.demo', 'Owner')}
-                    className={cn(
-                      'px-2 py-1 rounded text-[11px] font-medium cursor-pointer transition-colors',
-                      user.role === 'owner'
-                        ? 'bg-[#14532D] text-white'
-                        : 'bg-[#292524] text-[#D6D3D1] hover:text-white',
-                    )}
-                  >
-                    Owner
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleSwitchDemoRole('manager@dokan-os.demo', 'Manager')}
-                    className={cn(
-                      'px-2 py-1 rounded text-[11px] font-medium cursor-pointer transition-colors',
-                      user.role === 'manager'
-                        ? 'bg-[#14532D] text-white'
-                        : 'bg-[#292524] text-[#D6D3D1] hover:text-white',
-                    )}
-                  >
-                    Manager
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleSwitchDemoRole('staff@dokan-os.demo', 'Staff')}
-                    className={cn(
-                      'px-2 py-1 rounded text-[11px] font-medium cursor-pointer transition-colors',
-                      user.role === 'staff'
-                        ? 'bg-[#14532D] text-white'
-                        : 'bg-[#292524] text-[#D6D3D1] hover:text-white',
-                    )}
-                  >
-                    Staff
-                  </button>
-                </div>
-              </div>
-            )}
+              )}
 
             <div className="flex items-center justify-between gap-2 pt-1">
               <div className="min-w-0">
@@ -366,7 +364,7 @@ export function AppShell(): React.ReactElement {
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top Bar Contract for Workspace */}
         <header className="h-16 px-4 sm:px-6 border-b border-border bg-card flex items-center justify-between gap-3 sm:gap-6 shrink-0">
-          <div className="flex items-center gap-2 max-w-sm w-full">
+          <div className="flex items-center gap-2 max-w-xs sm:max-w-sm w-auto sm:w-full">
             <button
               type="button"
               onClick={() => setMobileOpen(true)}
@@ -376,7 +374,7 @@ export function AppShell(): React.ReactElement {
             >
               <Menu className="h-5 w-5" />
             </button>
-            <form onSubmit={handleGlobalSearch} className="relative w-full">
+            <form onSubmit={handleGlobalSearch} className="relative hidden sm:block w-full">
               <Search className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
               <Input
                 value={globalSearch}
@@ -387,10 +385,14 @@ export function AppShell(): React.ReactElement {
             </form>
           </div>
 
-          <div className="flex items-center gap-2.5 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
             <OfflineSyncHeaderControls />
             <PWAInstallButton />
-            {tenant && <PlanBadge plan={tenant.plan} />}
+            {tenant && (
+              <span className="hidden sm:inline-flex">
+                <PlanBadge plan={tenant.plan} />
+              </span>
+            )}
 
             <button
               type="button"
@@ -416,12 +418,13 @@ export function AppShell(): React.ReactElement {
 
             <Button
               size="sm"
+              className="px-2.5 sm:px-3"
               onClick={() => {
                 void navigate('/app/sales/new');
               }}
             >
               <FileSpreadsheet className="h-3.5 w-3.5" />
-              New POS Sale
+              <span className="hidden md:inline">New POS Sale</span>
             </Button>
           </div>
         </header>
