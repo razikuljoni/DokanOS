@@ -746,12 +746,15 @@ export function BillingPage(): React.ReactElement {
   const [billingPeriod, setBillingPeriod] = useState<BillingPeriod>('monthly');
   const [activeTab, setActiveTab] = useState<'sslcommerz' | 'stripe'>('sslcommerz');
 
-  const [customerPhone, setCustomerPhone] = useState('01711111111');
-  const [customerAddress, setCustomerAddress] = useState('House 10, Road 2, Dhanmondi');
-  const [customerCity, setCustomerCity] = useState('Dhaka');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [customerAddress, setCustomerAddress] = useState('');
+  const [customerCity, setCustomerCity] = useState('');
   const [phoneError, setPhoneError] = useState<string | null>(null);
   const [addressError, setAddressError] = useState<string | null>(null);
+  const [cityError, setCityError] = useState<string | null>(null);
 
+  // TEST-ONLY helper (rendered behind the DEV/sandbox gate): fills official SSLCommerz
+  // sandbox test values so testers never type fake data by hand.
   const fillTestDetails = () => {
     setCustomerPhone('01711111111');
     setCustomerAddress('House 10, Road 2, Dhanmondi');
@@ -842,13 +845,19 @@ export function BillingPage(): React.ReactElement {
     } else {
       setAddressError(null);
     }
+    if (!customerCity.trim()) {
+      setCityError('Customer city is required by SSLCommerz');
+      valid = false;
+    } else {
+      setCityError(null);
+    }
     if (!valid) return;
 
     initSslCommerzMutation.mutate({
       period: billingPeriod,
       phone: cleanPhone,
       address: customerAddress.trim(),
-      city: customerCity.trim() || 'Dhaka',
+      city: customerCity.trim(),
     });
   };
 
@@ -1240,15 +1249,19 @@ export function BillingPage(): React.ReactElement {
 
                     <div className="space-y-1">
                       <Label htmlFor="cus-city" className="text-xs">
-                        City
+                        City <span className="text-destructive">*</span>
                       </Label>
                       <Input
                         id="cus-city"
                         value={customerCity}
-                        onChange={(e) => setCustomerCity(e.target.value)}
+                        onChange={(e) => {
+                          setCustomerCity(e.target.value);
+                          if (cityError) setCityError(null);
+                        }}
                         placeholder="Dhaka"
-                        className="text-xs"
+                        className={`text-xs ${cityError ? 'border-destructive' : ''}`}
                       />
+                      {cityError && <p className="text-[11px] text-destructive">{cityError}</p>}
                     </div>
 
                     <div className="sm:col-span-2 space-y-1">
@@ -1282,7 +1295,7 @@ export function BillingPage(): React.ReactElement {
                         ? 'Connecting Gateway...'
                         : `Pay ৳${BILLING_PERIOD_PRICE_BDT[billingPeriod].toLocaleString()} via SSLCommerz`}
                     </span>
-                    <span className="font-mono text-xs">Cards · bKash · Internet Banking</span>
+                    <span className="font-mono text-xs">Cards · Internet Banking</span>
                   </Button>
                 </div>
               )}
@@ -1346,7 +1359,7 @@ export function BillingPage(): React.ReactElement {
               <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-border">
                 <div className="text-xs text-muted-foreground flex items-center gap-1.5 py-1">
                   <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                  <span>bKash Direct: Pending merchant onboarding</span>
+                  <span>bKash Direct: Coming soon — needs merchant onboarding</span>
                 </div>
 
                 {billing?.plan === 'pro' && (

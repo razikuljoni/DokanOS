@@ -293,7 +293,7 @@ export function LandingPage(): React.ReactElement {
                     </td>
                     <td className="py-3.5 px-3 whitespace-nowrap">
                       <span className="inline-block rounded border border-[#E7E0D4] bg-[#F3EFE6] px-2 py-0.5 text-[10px] font-mono font-semibold text-[#1C1917]">
-                        bKash
+                        Card
                       </span>
                     </td>
                     <td className="py-3.5 pl-3 pr-6 text-right font-mono font-semibold text-[#1C1917] tabular-nums whitespace-nowrap">
@@ -315,7 +315,7 @@ export function LandingPage(): React.ReactElement {
                     </td>
                     <td className="py-3.5 px-3 whitespace-nowrap">
                       <span className="inline-block rounded bg-[#DCFCE7] px-2 py-0.5 text-[10px] font-mono font-semibold text-[#14532D]">
-                        bKash
+                        Card
                       </span>
                     </td>
                     <td className="py-3.5 pl-3 pr-6 text-right font-mono font-semibold text-[#14532D] tabular-nums whitespace-nowrap">
@@ -464,7 +464,7 @@ export function LandingPage(): React.ReactElement {
                       </span>
                     </div>
                     <div className="rounded border border-[#E7E0D4] bg-white px-2.5 py-1.5 flex items-center justify-between">
-                      <span className="text-[10px] text-[#57534E]">bKash Merchant</span>
+                      <span className="text-[10px] text-[#57534E]">Card Payment</span>
                       <span className="font-mono text-xs font-semibold text-[#14532D] tabular-nums">
                         ৳250
                       </span>
@@ -559,7 +559,7 @@ export function LandingPage(): React.ReactElement {
                       Cash drawer match: <strong className="text-[#1C1917]">৳12,800</strong>
                     </span>
                     <span>
-                      bKash settlement: <strong className="text-[#1C1917]">৳5,650</strong>
+                      Card settlement: <strong className="text-[#1C1917]">৳5,650</strong>
                     </span>
                   </div>
                 </div>
