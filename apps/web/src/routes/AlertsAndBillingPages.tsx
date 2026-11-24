@@ -1350,15 +1350,26 @@ export function BillingPage(): React.ReactElement {
                 </div>
 
                 {billing?.plan === 'pro' && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-xs"
-                    disabled={cancelPlanMutation.isPending}
-                    onClick={() => cancelPlanMutation.mutate(true)}
-                  >
-                    Switch to Free Plan (Demo Toggle)
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs"
+                      disabled={cancelPlanMutation.isPending}
+                      onClick={() => cancelPlanMutation.mutate(false)}
+                    >
+                      Cancel at End of Period
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
+                      disabled={cancelPlanMutation.isPending}
+                      onClick={() => cancelPlanMutation.mutate(true)}
+                    >
+                      Switch to Free Plan Immediately
+                    </Button>
+                  </div>
                 )}
               </div>
             </CardContent>
