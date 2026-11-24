@@ -1282,7 +1282,7 @@ export function BillingPage(): React.ReactElement {
                         ? 'Connecting Gateway...'
                         : `Pay ৳${BILLING_PERIOD_PRICE_BDT[billingPeriod].toLocaleString()} via SSLCommerz`}
                     </span>
-                    <span className="font-mono text-xs">Cards · bKash · Nagad</span>
+                    <span className="font-mono text-xs">Cards · bKash · Internet Banking</span>
                   </Button>
                 </div>
               )}
