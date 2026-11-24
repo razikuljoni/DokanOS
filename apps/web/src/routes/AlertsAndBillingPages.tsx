@@ -31,6 +31,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { DataTable, EmptyState, PlanBadge, type DataTableColumn } from '@/components/SharedWidgets';
+import { Skeleton } from '@/components/ui/skeleton';
 import { downloadCsvFile, formatBDT, formatDateDhaka } from '@/lib/utils';
 
 // /app/alerts — Low-Stock Watchlist & Notifications Feed
@@ -110,7 +111,9 @@ export function AlertsPage(): React.ReactElement {
 
       try {
         const query =
-          thresholdMode === 'custom' ? `?threshold=${encodeURIComponent(parsedCustomThreshold)}` : '';
+          thresholdMode === 'custom'
+            ? `?threshold=${encodeURIComponent(parsedCustomThreshold)}`
+            : '';
         const res = await apiFetch<{ data: LowStockProductItem[] }>(
           `/api/v1/products/low-stock${query}`,
         );
@@ -633,7 +636,8 @@ export function AlertsPage(): React.ReactElement {
               Activity & System Notifications Feed
             </h2>
             <p className="text-xs text-muted-foreground">
-              Chronological log of triggered low-stock alerts, Baki due reminders, and billing events.
+              Chronological log of triggered low-stock alerts, Baki due reminders, and billing
+              events.
             </p>
           </div>
           {items.some((i) => !i.isRead) && (
@@ -746,12 +750,15 @@ export function BillingPage(): React.ReactElement {
   const [billingPeriod, setBillingPeriod] = useState<BillingPeriod>('monthly');
   const [activeTab, setActiveTab] = useState<'sslcommerz' | 'stripe'>('sslcommerz');
 
-  const [customerPhone, setCustomerPhone] = useState('01711111111');
-  const [customerAddress, setCustomerAddress] = useState('House 10, Road 2, Dhanmondi');
-  const [customerCity, setCustomerCity] = useState('Dhaka');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [customerAddress, setCustomerAddress] = useState('');
+  const [customerCity, setCustomerCity] = useState('');
   const [phoneError, setPhoneError] = useState<string | null>(null);
   const [addressError, setAddressError] = useState<string | null>(null);
+  const [cityError, setCityError] = useState<string | null>(null);
 
+  // TEST-ONLY helper (rendered behind the DEV/sandbox gate): fills official SSLCommerz
+  // sandbox test values so testers never type fake data by hand.
   const fillTestDetails = () => {
     setCustomerPhone('01711111111');
     setCustomerAddress('House 10, Road 2, Dhanmondi');
@@ -842,13 +849,19 @@ export function BillingPage(): React.ReactElement {
     } else {
       setAddressError(null);
     }
+    if (!customerCity.trim()) {
+      setCityError('Customer city is required by SSLCommerz');
+      valid = false;
+    } else {
+      setCityError(null);
+    }
     if (!valid) return;
 
     initSslCommerzMutation.mutate({
       period: billingPeriod,
       phone: cleanPhone,
       address: customerAddress.trim(),
-      city: customerCity.trim() || 'Dhaka',
+      city: customerCity.trim(),
     });
   };
 
@@ -877,7 +890,8 @@ export function BillingPage(): React.ReactElement {
     onError: (err) => {
       addToast({
         title: 'Stripe Checkout Failed',
-        description: err instanceof Error ? err.message : 'Could not create Stripe checkout session',
+        description:
+          err instanceof Error ? err.message : 'Could not create Stripe checkout session',
         variant: 'danger',
       });
     },
@@ -893,6 +907,18 @@ export function BillingPage(): React.ReactElement {
     onSuccess: (_, immediate) => {
       if (immediate) {
         updateTenant({ plan: 'free', planExpiresAt: null, trialEndsAt: null });
+      } else {
+        // Cancel at end of period: the plan stays active until expiry, so refresh
+        // the auth-store plan from the server rather than guessing.
+        void fetch('/api/v1/auth/me', {
+          headers: { Authorization: `Bearer ${useAuthStore.getState().accessToken}` },
+        })
+          .then((r) => r.json())
+          .then((j) => {
+            const t = (j.data ?? j).tenant ?? j.tenant;
+            if (t) updateTenant({ plan: t.plan, planExpiresAt: t.planExpiresAt ?? null });
+          })
+          .catch(() => {});
       }
       void queryClient.invalidateQueries({ queryKey: ['billing', tenant?.id] });
       addToast({
@@ -1048,79 +1074,100 @@ export function BillingPage(): React.ReactElement {
           <Card className="h-full flex flex-col justify-between">
             <CardHeader>
               <CardDescription>Current Shop Plan</CardDescription>
-              <CardTitle className="text-2xl flex items-center justify-between">
-                <span>
-                  {billing?.plan === 'pro' &&
-                  billing?.trialEndsAt &&
-                  new Date(billing.trialEndsAt).getTime() > Date.now()
-                    ? 'DokanOS Pro Trial'
-                    : billing?.plan === 'pro'
-                      ? 'DokanOS Pro'
-                      : 'DokanOS Free Plan'}
-                </span>
-                <ShieldCheck className="h-5 w-5 text-primary" />
-              </CardTitle>
-              {billing?.planExpiresAt && (
+              {isLoading ? (
+                <CardTitle className="text-2xl">
+                  <Skeleton className="h-8 w-48" />
+                </CardTitle>
+              ) : (
+                <CardTitle className="text-2xl flex items-center justify-between">
+                  <span>
+                    {billing?.plan === 'pro' &&
+                    billing?.trialEndsAt &&
+                    new Date(billing.trialEndsAt).getTime() > Date.now()
+                      ? 'DokanOS Pro Trial'
+                      : billing?.plan === 'pro'
+                        ? 'DokanOS Pro'
+                        : 'DokanOS Free Plan'}
+                  </span>
+                  <ShieldCheck className="h-5 w-5 text-primary" />
+                </CardTitle>
+              )}
+              {!isLoading && billing?.planExpiresAt && (
                 <p className="text-xs text-muted-foreground tabular-nums">
-                  {billing?.trialEndsAt &&
-                  new Date(billing.trialEndsAt).getTime() > Date.now()
+                  {billing?.trialEndsAt && new Date(billing.trialEndsAt).getTime() > Date.now()
                     ? `Free trial valid until ${formatDateDhaka(billing.planExpiresAt)} — pay before then to keep Pro without a gap`
                     : `Current period valid until ${formatDateDhaka(billing.planExpiresAt)}`}
                 </p>
               )}
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Active Products</span>
-                  <span className="font-mono tabular-nums font-semibold">
-                    {billing?.usage.productCount ?? 0} /{' '}
-                    {billing?.limits.maxProducts ?? 'Unlimited'}
-                  </span>
+              {isLoading ? (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Skeleton className="h-4 w-full" />
+                    <Skeleton className="h-2 w-full" />
+                  </div>
+                  <div className="space-y-2">
+                    <Skeleton className="h-4 w-full" />
+                    <Skeleton className="h-2 w-full" />
+                  </div>
+                  <Skeleton className="h-4 w-3/4" />
                 </div>
-                <div className="h-2 rounded-full bg-secondary overflow-hidden">
-                  <div
-                    className="h-full bg-primary"
-                    style={{
-                      width: billing?.limits.maxProducts
-                        ? `${Math.min(100, ((billing.usage.productCount ?? 0) / billing.limits.maxProducts) * 100)}%`
-                        : '22%',
-                    }}
-                  />
-                </div>
-              </div>
+              ) : (
+                <>
+                  <div className="space-y-2 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Active Products</span>
+                      <span className="font-mono tabular-nums font-semibold">
+                        {billing?.usage.productCount ?? 0} /{' '}
+                        {billing?.limits.maxProducts ?? 'Unlimited'}
+                      </span>
+                    </div>
+                    <div className="h-2 rounded-full bg-secondary overflow-hidden">
+                      <div
+                        className="h-full bg-primary"
+                        style={{
+                          width: billing?.limits.maxProducts
+                            ? `${Math.min(100, ((billing.usage.productCount ?? 0) / billing.limits.maxProducts) * 100)}%`
+                            : '22%',
+                        }}
+                      />
+                    </div>
+                  </div>
 
-              <div className="space-y-2 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Staff & Manager Accounts</span>
-                  <span className="font-mono tabular-nums font-semibold">
-                    {billing?.usage.staffCount ?? 0} / {billing?.limits.maxStaff ?? 1}
-                  </span>
-                </div>
-                <div className="h-2 rounded-full bg-secondary overflow-hidden">
-                  <div
-                    className="h-full bg-primary"
-                    style={{
-                      width: `${Math.min(100, ((billing?.usage.staffCount ?? 0) / (billing?.limits.maxStaff ?? 1)) * 100)}%`,
-                    }}
-                  />
-                </div>
-              </div>
+                  <div className="space-y-2 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Staff & Manager Accounts</span>
+                      <span className="font-mono tabular-nums font-semibold">
+                        {billing?.usage.staffCount ?? 0} / {billing?.limits.maxStaff ?? 1}
+                      </span>
+                    </div>
+                    <div className="h-2 rounded-full bg-secondary overflow-hidden">
+                      <div
+                        className="h-full bg-primary"
+                        style={{
+                          width: `${Math.min(100, ((billing?.usage.staffCount ?? 0) / (billing?.limits.maxStaff ?? 1)) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
 
-              <div className="pt-2 border-t border-border grid grid-cols-2 gap-2 text-xs">
-                <div>
-                  CSV Import / Export:{' '}
-                  <strong className="text-foreground">
-                    {billing?.limits.csvImportExport ? 'Enabled' : 'Pro Only'}
-                  </strong>
-                </div>
-                <div>
-                  Email Digests:{' '}
-                  <strong className="text-foreground">
-                    {billing?.limits.emailDigests ? 'Enabled' : 'Pro Only'}
-                  </strong>
-                </div>
-              </div>
+                  <div className="pt-2 border-t border-border grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      CSV Import / Export:{' '}
+                      <strong className="text-foreground">
+                        {billing?.limits.csvImportExport ? 'Enabled' : 'Pro Only'}
+                      </strong>
+                    </div>
+                    <div>
+                      Email Digests:{' '}
+                      <strong className="text-foreground">
+                        {billing?.limits.emailDigests ? 'Enabled' : 'Pro Only'}
+                      </strong>
+                    </div>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -1135,15 +1182,16 @@ export function BillingPage(): React.ReactElement {
                   : `Upgrade to DokanOS Pro · ${billingPeriod === 'annual' ? 'Annual (365 days)' : 'Monthly (30 days)'} (৳${BILLING_PERIOD_PRICE_BDT[billingPeriod].toLocaleString()})`}
               </CardTitle>
               <CardDescription>
-                Local Bangladeshi gateways use one-off payments — no auto-renewal. Every callback
-                is verified server-side and deduplicated on <code>{'{ provider, eventId }'}</code>.
+                Local Bangladeshi gateways use one-off payments — no auto-renewal. Every callback is
+                verified server-side and deduplicated on <code>{'{ provider, eventId }'}</code>.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <Button
                   type="button"
                   variant={billingPeriod === 'monthly' ? 'default' : 'outline'}
+                  className="h-auto min-h-10 py-2 whitespace-normal"
                   onClick={() => setBillingPeriod('monthly')}
                 >
                   Monthly · ৳499 / 30 days
@@ -1151,6 +1199,7 @@ export function BillingPage(): React.ReactElement {
                 <Button
                   type="button"
                   variant={billingPeriod === 'annual' ? 'default' : 'outline'}
+                  className="h-auto min-h-10 py-2 whitespace-normal"
                   onClick={() => setBillingPeriod('annual')}
                 >
                   Annual · ৳4,200 / 365 days (save ৳1,788)
@@ -1240,15 +1289,19 @@ export function BillingPage(): React.ReactElement {
 
                     <div className="space-y-1">
                       <Label htmlFor="cus-city" className="text-xs">
-                        City
+                        City <span className="text-destructive">*</span>
                       </Label>
                       <Input
                         id="cus-city"
                         value={customerCity}
-                        onChange={(e) => setCustomerCity(e.target.value)}
+                        onChange={(e) => {
+                          setCustomerCity(e.target.value);
+                          if (cityError) setCityError(null);
+                        }}
                         placeholder="Dhaka"
-                        className="text-xs"
+                        className={`text-xs ${cityError ? 'border-destructive' : ''}`}
                       />
+                      {cityError && <p className="text-[11px] text-destructive">{cityError}</p>}
                     </div>
 
                     <div className="sm:col-span-2 space-y-1">
@@ -1272,17 +1325,19 @@ export function BillingPage(): React.ReactElement {
                   </div>
 
                   <Button
-                    className="w-full justify-between"
+                    className="w-full h-auto min-h-10 flex-col items-start gap-1 sm:flex-row sm:items-center sm:justify-between"
                     disabled={initSslCommerzMutation.isPending}
                     onClick={validateAndSubmitSslCommerz}
                   >
-                    <span className="flex items-center gap-2">
-                      <CreditCard className="h-4 w-4" />
+                    <span className="flex min-w-0 items-center gap-2 text-left whitespace-normal">
+                      <CreditCard className="h-4 w-4 shrink-0" />
                       {initSslCommerzMutation.isPending
                         ? 'Connecting Gateway...'
                         : `Pay ৳${BILLING_PERIOD_PRICE_BDT[billingPeriod].toLocaleString()} via SSLCommerz`}
                     </span>
-                    <span className="font-mono text-xs">Cards · bKash · Nagad</span>
+                    <span className="font-mono text-xs whitespace-normal text-left sm:text-right">
+                      Cards · Internet Banking
+                    </span>
                   </Button>
                 </div>
               )}
@@ -1312,7 +1367,8 @@ export function BillingPage(): React.ReactElement {
                       </div>
                       <div className="grid grid-cols-2 gap-1.5 text-[11px] font-mono text-muted-foreground">
                         <div>
-                          Test Card: <strong className="text-foreground">4242 4242 4242 4242</strong>
+                          Test Card:{' '}
+                          <strong className="text-foreground">4242 4242 4242 4242</strong>
                         </div>
                         <div>
                           Expiry: <strong className="text-foreground">12/26 (CVC 111)</strong>
@@ -1328,17 +1384,19 @@ export function BillingPage(): React.ReactElement {
 
                   <Button
                     variant="outline"
-                    className="w-full justify-between"
+                    className="w-full h-auto min-h-10 flex-col items-start gap-1 sm:flex-row sm:items-center sm:justify-between"
                     disabled={initStripeTestMutation.isPending}
                     onClick={() => initStripeTestMutation.mutate()}
                   >
-                    <span className="flex items-center gap-2">
-                      <CreditCard className="h-4 w-4" />
+                    <span className="flex min-w-0 items-center gap-2 text-left whitespace-normal">
+                      <CreditCard className="h-4 w-4 shrink-0" />
                       {initStripeTestMutation.isPending
                         ? 'Creating Checkout...'
                         : `Pay ৳${BILLING_PERIOD_PRICE_BDT[billingPeriod].toLocaleString()} via Stripe Checkout`}
                     </span>
-                    <span className="font-mono text-xs">Visa · Mastercard · Amex</span>
+                    <span className="font-mono text-xs whitespace-normal text-left sm:text-right">
+                      Visa · Mastercard · Amex
+                    </span>
                   </Button>
                 </div>
               )}
@@ -1346,19 +1404,30 @@ export function BillingPage(): React.ReactElement {
               <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-border">
                 <div className="text-xs text-muted-foreground flex items-center gap-1.5 py-1">
                   <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                  <span>bKash Direct: Pending merchant onboarding</span>
+                  <span>bKash Direct: Coming soon — needs merchant onboarding</span>
                 </div>
 
                 {billing?.plan === 'pro' && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-xs"
-                    disabled={cancelPlanMutation.isPending}
-                    onClick={() => cancelPlanMutation.mutate(true)}
-                  >
-                    Switch to Free Plan (Demo Toggle)
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs"
+                      disabled={cancelPlanMutation.isPending}
+                      onClick={() => cancelPlanMutation.mutate(false)}
+                    >
+                      Cancel at End of Period
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
+                      disabled={cancelPlanMutation.isPending}
+                      onClick={() => cancelPlanMutation.mutate(true)}
+                    >
+                      Switch to Free Plan Immediately
+                    </Button>
+                  </div>
                 )}
               </div>
             </CardContent>
@@ -1378,111 +1447,113 @@ export function BillingPage(): React.ReactElement {
       </div>
 
       {/* SSLCommerz Sandbox / Stripe Test Mode Checkout Modal */}
-      {sandboxModal && (import.meta.env.DEV || import.meta.env.VITE_ENABLE_SANDBOX_SIMULATOR === 'true') && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-card border border-border rounded-md max-w-md w-full p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-border pb-3">
-              <div>
-                <h3 className="font-display text-lg font-bold">
-                  {sandboxModal.provider === 'sslcommerz'
-                    ? 'SSLCommerz SANDBOX Gateway'
-                    : 'Stripe Checkout (TEST MODE)'}
-                </h3>
-                <p className="text-xs font-mono text-muted-foreground">
-                  tran_id: {sandboxModal.tranId}
-                </p>
-                <p className="text-[11px] font-mono text-warning mt-1">
-                  Sandbox simulator — no real gateway call in development
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSandboxModal(null)}
-                className="text-muted-foreground hover:text-foreground cursor-pointer"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="p-3 rounded-md bg-secondary/60 border border-border text-xs space-y-1">
-              <div className="flex justify-between">
-                <span>Product:</span>
-                <strong>
-                  DokanOS Pro ({sandboxModal.period === 'annual' ? 'Annual (365 days)' : 'Monthly (30 days)'})
-                </strong>
-              </div>
-              <div className="flex justify-between">
-                <span>Amount:</span>
-                <strong className="font-mono tabular-nums">
-                  {formatBDT(sandboxModal.amount)}
-                </strong>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="test-card" className="text-xs">
-                  Sandbox Test Card Number
-                </Label>
-                <Button
+      {sandboxModal &&
+        (import.meta.env.DEV || import.meta.env.VITE_ENABLE_SANDBOX_SIMULATOR === 'true') && (
+          <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+            <div className="bg-card border border-border rounded-md max-w-md w-full p-6 space-y-4">
+              <div className="flex items-center justify-between border-b border-border pb-3">
+                <div>
+                  <h3 className="font-display text-lg font-bold">
+                    {sandboxModal.provider === 'sslcommerz'
+                      ? 'SSLCommerz SANDBOX Gateway'
+                      : 'Stripe Checkout (TEST MODE)'}
+                  </h3>
+                  <p className="text-xs font-mono text-muted-foreground">
+                    tran_id: {sandboxModal.tranId}
+                  </p>
+                  <p className="text-[11px] font-mono text-warning mt-1">
+                    Sandbox simulator — no real gateway call in development
+                  </p>
+                </div>
+                <button
                   type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 text-[11px] px-1.5 text-primary"
-                  onClick={() => {
-                    if (sandboxModal.provider === 'sslcommerz') {
-                      setCardNumber('4111111111111111');
-                    } else {
-                      setCardNumber('4242424242424242');
-                    }
-                    setOtp('123456');
-                  }}
+                  onClick={() => setSandboxModal(null)}
+                  className="text-muted-foreground hover:text-foreground cursor-pointer"
                 >
-                  Fill test details
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="p-3 rounded-md bg-secondary/60 border border-border text-xs space-y-1">
+                <div className="flex justify-between">
+                  <span>Product:</span>
+                  <strong>
+                    DokanOS Pro (
+                    {sandboxModal.period === 'annual' ? 'Annual (365 days)' : 'Monthly (30 days)'})
+                  </strong>
+                </div>
+                <div className="flex justify-between">
+                  <span>Amount:</span>
+                  <strong className="font-mono tabular-nums">
+                    {formatBDT(sandboxModal.amount)}
+                  </strong>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="test-card" className="text-xs">
+                    Sandbox Test Card Number
+                  </Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-[11px] px-1.5 text-primary"
+                    onClick={() => {
+                      if (sandboxModal.provider === 'sslcommerz') {
+                        setCardNumber('4111111111111111');
+                      } else {
+                        setCardNumber('4242424242424242');
+                      }
+                      setOtp('123456');
+                    }}
+                  >
+                    Fill test details
+                  </Button>
+                </div>
+                <Input
+                  id="test-card"
+                  value={cardNumber}
+                  onChange={(e) => setCardNumber(e.target.value)}
+                  className="font-mono"
+                />
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Expiry / CVV</Label>
+                    <Input value="12/26 · 111" readOnly className="font-mono text-xs" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="test-otp" className="text-xs">
+                      Sandbox OTP
+                    </Label>
+                    <Input
+                      id="test-otp"
+                      value={otp}
+                      onChange={(e) => setOtp(e.target.value)}
+                      className="font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" size="sm" onClick={() => setSandboxModal(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={completeSandboxPaymentMutation.isPending}
+                  onClick={() => completeSandboxPaymentMutation.mutate()}
+                >
+                  {completeSandboxPaymentMutation.isPending
+                    ? 'Validating Server-Side...'
+                    : `Authorize Test Payment (${formatBDT(sandboxModal.amount)})`}
                 </Button>
               </div>
-              <Input
-                id="test-card"
-                value={cardNumber}
-                onChange={(e) => setCardNumber(e.target.value)}
-                className="font-mono"
-              />
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-xs">Expiry / CVV</Label>
-                  <Input value="12/26 · 111" readOnly className="font-mono text-xs" />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="test-otp" className="text-xs">
-                    Sandbox OTP
-                  </Label>
-                  <Input
-                    id="test-otp"
-                    value={otp}
-                    onChange={(e) => setOtp(e.target.value)}
-                    className="font-mono"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" size="sm" onClick={() => setSandboxModal(null)}>
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                disabled={completeSandboxPaymentMutation.isPending}
-                onClick={() => completeSandboxPaymentMutation.mutate()}
-              >
-                {completeSandboxPaymentMutation.isPending
-                  ? 'Validating Server-Side...'
-                  : `Authorize Test Payment (${formatBDT(sandboxModal.amount)})`}
-              </Button>
             </div>
           </div>
-        </div>
-      )}
+        )}
     </div>
   );
 }

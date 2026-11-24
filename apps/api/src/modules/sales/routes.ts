@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import mongoose, { Types } from 'mongoose';
-import { createSaleSchema, type PaymentStatus } from '@dokanos/shared';
+import { createSaleSchema, returnSaleSchema, type PaymentStatus } from '@dokanos/shared';
 import {
   CustomerModel,
   NotificationModel,
@@ -122,6 +122,7 @@ salesRouter.post('/', requirePermission('sales:write'), async (req, res, next) =
             price: updatedProduct.sellPrice,
             costPrice: updatedProduct.costPrice,
             lineTotal,
+            returnedQty: 0,
           });
 
           movementsToInsert.push({
@@ -143,9 +144,7 @@ salesRouter.post('/', requirePermission('sales:write'), async (req, res, next) =
           }
         }
 
-        const subtotal = Number(
-          saleItems.reduce((acc, it) => acc + it.lineTotal, 0).toFixed(2),
-        );
+        const subtotal = Number(saleItems.reduce((acc, it) => acc + it.lineTotal, 0).toFixed(2));
         const discount = Math.min(parsed.discount, subtotal);
         const total = Number(Math.max(0, subtotal - discount).toFixed(2));
         const paidAmount = Number(Math.min(parsed.paidAmount, total).toFixed(2));
@@ -286,9 +285,7 @@ salesRouter.post('/', requirePermission('sales:write'), async (req, res, next) =
       }
     }
 
-    const sale = await SaleModel.findById(createdSaleId)
-      .populate('soldBy', 'name role')
-      .lean();
+    const sale = await SaleModel.findById(createdSaleId).populate('soldBy', 'name role').lean();
 
     await invalidateTenantCache(req.tenant!.id);
 
@@ -418,10 +415,11 @@ salesRouter.get('/:id', requirePermission('sales:read'), async (req, res, next) 
   }
 });
 
-// POST /api/v1/sales/:id/return (owner/manager: restock + create return movement; only for paid sales)
+// POST /api/v1/sales/:id/return (owner/manager: partial restock + return ledger entry)
 salesRouter.post('/:id/return', requirePermission('sales:return'), async (req, res, next) => {
   const session = await mongoose.startSession();
   try {
+    const parsed = returnSaleSchema.parse(req.body);
     const saleObjectId = toObjectIdParam(req.params.id, 'Sale not found');
     const tenantObjectId = new Types.ObjectId(req.tenant!.id);
 
@@ -431,56 +429,68 @@ salesRouter.post('/:id/return', requirePermission('sales:return'), async (req, r
         tenantId: tenantObjectId,
       }).session(session);
 
-      if (!sale) {
-        throw AppError.notFound('Sale not found');
-      }
+      if (!sale) throw AppError.notFound('Sale not found');
       if (sale.paymentStatus !== 'paid') {
         throw AppError.badRequest('Only fully paid sales can be returned');
       }
-      if (sale.isReturned) {
-        throw AppError.badRequest('This sale has already been returned');
+
+      const requestedByProduct = new Map(parsed.items.map((item) => [item.productId, item.qty]));
+      const returnedItems = sale.items
+        .map((item) => {
+          const requestedQty = requestedByProduct.get(item.productId.toString()) ?? 0;
+          const priorReturned = item.returnedQty ?? 0;
+          const remainingQty = item.qty - priorReturned;
+          if (requestedQty > remainingQty) {
+            throw AppError.badRequest(
+              `Cannot return more than remaining quantity for ${item.name}`,
+            );
+          }
+          return { item, qty: requestedQty };
+        })
+        .filter(({ qty }) => qty > 0);
+
+      if (returnedItems.length === 0)
+        throw AppError.badRequest('No valid items selected for return');
+      if (
+        parsed.items.some(
+          (requested) =>
+            !sale.items.some((item) => item.productId.toString() === requested.productId),
+        )
+      ) {
+        throw AppError.badRequest('Return contains a product that was not sold on this invoice');
       }
 
-      for (const item of sale.items) {
+      for (const { item, qty } of returnedItems) {
         const updatedProduct = await ProductModel.findOneAndUpdate(
           { _id: item.productId, tenantId: tenantObjectId },
-          { $inc: { stock: item.qty } },
+          { $inc: { stock: qty } },
           { session, new: true },
         );
+        if (!updatedProduct) throw AppError.notFound(`Product not found: ${item.name}`);
 
-        if (updatedProduct) {
-          await StockMovementModel.create(
-            [
-              {
-                tenantId: tenantObjectId,
-                productId: updatedProduct._id,
-                type: 'return',
-                qtyChange: item.qty,
-                balanceAfter: updatedProduct.stock,
-                refId: sale._id,
-                refType: 'Return',
-                userId: new Types.ObjectId(req.user!.id),
-                note: `Return for ${sale.invoiceNo}`,
-              },
-            ],
-            { session },
-          );
-        }
+        await StockMovementModel.create(
+          [
+            {
+              tenantId: tenantObjectId,
+              productId: updatedProduct._id,
+              type: 'return',
+              qtyChange: qty,
+              balanceAfter: updatedProduct.stock,
+              refId: sale._id,
+              refType: 'Return',
+              userId: new Types.ObjectId(req.user!.id),
+              note: `Return processed for ${sale.invoiceNo}; original cashier ${sale.soldBy.toString()}`,
+            },
+          ],
+          { session },
+        );
       }
 
-      sale.isReturned = true;
+      for (const { item, qty } of returnedItems) {
+        item.returnedQty = (item.returnedQty ?? 0) + qty;
+      }
+      sale.isReturned = sale.items.every((item) => (item.returnedQty ?? 0) >= item.qty);
       await sale.save({ session });
-
-      if (sale.customerId) {
-        const cust = await CustomerModel.findOne({
-          _id: sale.customerId,
-          tenantId: tenantObjectId,
-        }).session(session);
-        if (cust) {
-          cust.totalSpent = Math.max(0, Number((cust.totalSpent - sale.total).toFixed(2)));
-          await cust.save({ session });
-        }
-      }
 
       await recordAuditLog({
         tenantId: req.tenant!.id,
@@ -488,15 +498,19 @@ salesRouter.post('/:id/return', requirePermission('sales:return'), async (req, r
         action: 'sale.returned',
         entity: 'Sale',
         entityId: sale._id.toString(),
-        changes: { invoiceNo: sale.invoiceNo, total: sale.total },
+        changes: {
+          invoiceNo: sale.invoiceNo,
+          returnedItems: returnedItems.map(({ item, qty }) => ({
+            productId: item.productId.toString(),
+            qty,
+          })),
+          status: 'RETURNED',
+        },
       });
     });
 
     await invalidateTenantCache(req.tenant!.id);
-
-    const updated = await SaleModel.findById(saleObjectId)
-      .populate('soldBy', 'name role')
-      .lean();
+    const updated = await SaleModel.findById(saleObjectId).populate('soldBy', 'name role').lean();
     res.status(200).json({ data: updated });
   } catch (err) {
     next(err);

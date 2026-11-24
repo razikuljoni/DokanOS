@@ -365,32 +365,57 @@ class SslCommerzBillingProvider implements BillingProvider {
 
     const cusName = user.name || tenant.name || 'DokanOS Merchant';
     const cusEmail = user.email || 'billing@dokanos.app';
-    const cusPhone = customerInfo?.phone?.trim() || '01711111111';
-    const cusAdd1 = customerInfo?.address?.trim() || 'Dhaka, Bangladesh';
-    const cusCity = customerInfo?.city?.trim() || 'Dhaka';
+    // Never hardcode customer contact details: real values come from the checkout form
+    // (or test fixtures in the test environment only).
+    const cusPhone = customerInfo?.phone?.trim();
+    const cusAdd1 = customerInfo?.address?.trim();
+    const cusCity = customerInfo?.city?.trim();
+    if (env.NODE_ENV !== 'test') {
+      if (!cusPhone) throw AppError.badRequest('Customer phone is required by SSLCommerz');
+      if (!cusAdd1) throw AppError.badRequest('Customer address is required by SSLCommerz');
+      if (!cusCity) throw AppError.badRequest('Customer city is required by SSLCommerz');
+    }
 
     let gatewayUrl = `/app/billing?sandbox_checkout=sslcommerz&tran_id=${encodeURIComponent(tranId)}&amount=${amount}&period=${period}`;
 
-    const formData = new URLSearchParams({
-      store_id: env.SSLCZ_STORE_ID,
-      store_passwd: env.SSLCZ_STORE_PASSWD,
-      total_amount: String(amount),
+    const formData = new URLSearchParams();
+    formData.append('store_id', env.SSLCZ_STORE_ID);
+    formData.append('store_passwd', env.SSLCZ_STORE_PASSWD);
+    formData.append('total_amount', String(amount));
+    formData.append('currency', 'BDT');
+    formData.append('tran_id', tranId);
+    formData.append('success_url', env.SSLCZ_SUCCESS_URL);
+    formData.append('fail_url', env.SSLCZ_FAIL_URL);
+    formData.append('cancel_url', env.SSLCZ_CANCEL_URL);
+    formData.append('ipn_url', env.SSLCZ_IPN_URL);
+    formData.append('cus_name', cusName);
+    formData.append('cus_email', cusEmail);
+    formData.append('cus_add1', cusAdd1 ?? '');
+    formData.append('cus_city', cusCity ?? '');
+    formData.append('cus_country', 'Bangladesh');
+    formData.append('cus_phone', cusPhone ?? '');
+    formData.append('shipping_method', 'NO');
+    formData.append('product_name', productName);
+    formData.append('product_category', 'Subscription');
+    formData.append('product_profile', 'general');
+
+    // Never log the store password — log the sanitized init request and raw gateway response
+    // so a blank checkout page can be diagnosed from the server logs.
+    logger.info('SSLCommerz init request', {
+      tranId,
+      gatewayApiUrl,
+      storeId: env.SSLCZ_STORE_ID,
+      sandbox: isSandbox,
+      amount,
       currency: 'BDT',
-      tran_id: tranId,
-      success_url: env.SSLCZ_SUCCESS_URL,
-      fail_url: env.SSLCZ_FAIL_URL,
-      cancel_url: env.SSLCZ_CANCEL_URL,
-      ipn_url: env.SSLCZ_IPN_URL,
-      cus_name: cusName,
-      cus_email: cusEmail,
-      cus_add1: cusAdd1,
-      cus_city: cusCity,
-      cus_country: 'Bangladesh',
-      cus_phone: cusPhone,
-      shipping_method: 'NO',
-      product_name: productName,
-      product_category: 'Subscription',
-      product_profile: 'general',
+      returnUrls: {
+        success: env.SSLCZ_SUCCESS_URL,
+        fail: env.SSLCZ_FAIL_URL,
+        cancel: env.SSLCZ_CANCEL_URL,
+        ipn: env.SSLCZ_IPN_URL,
+      },
+      hasCustomerPhone: Boolean(cusPhone),
+      hasCustomerAddress: Boolean(cusAdd1),
     });
 
     try {
@@ -403,21 +428,37 @@ class SslCommerzBillingProvider implements BillingProvider {
         timeout: 10000,
       });
 
+      logger.info('SSLCommerz init response', {
+        tranId,
+        status: resp.data?.status,
+        failedreason: resp.data?.failedreason,
+        hasGatewayPageUrl: Boolean(resp.data?.GatewayPageURL),
+        gatewayPageHost: resp.data?.GatewayPageURL
+          ? new URL(resp.data.GatewayPageURL).host
+          : null,
+      });
+
       if (resp.data?.status === 'SUCCESS' && resp.data.GatewayPageURL) {
         gatewayUrl = resp.data.GatewayPageURL;
-      } else if (env.NODE_ENV === 'production') {
+      } else if (env.NODE_ENV !== 'test') {
+        // Gateway answered but produced no usable checkout URL — surface the real
+        // reason instead of redirecting to a dead/blank page.
         throw AppError.badRequest(
           `SSLCommerz session initialization failed: ${resp.data?.failedreason || resp.data?.status || 'Unknown gateway error'}`,
         );
       }
     } catch (err) {
       if (err instanceof AppError) throw err;
+      logger.warn('SSLCommerz init connection failed', {
+        tranId,
+        error: err instanceof Error ? err.message : 'Network error',
+      });
       if (env.NODE_ENV === 'production') {
         throw AppError.badRequest(
           `Failed to connect to SSLCommerz gateway: ${err instanceof Error ? err.message : 'Network error'}`,
         );
       }
-      // Non-production fallback to local simulator URL
+      // Non-production fallback to local simulator URL (DEV-only sandbox modal)
     }
 
     return {
@@ -731,36 +772,21 @@ class StripeTestBillingProvider implements BillingProvider {
 }
 
 /**
- * 3. bKash Provider — STUB ONLY per §7
+ * 3. bKash — not wired. There is no bKash checkout button in the UI (billing shows
+ * "bKash Direct: Coming soon — needs merchant onboarding" instead), so no stub route
+ * is exposed: a payable-looking 501 endpoint must never exist. To enable it later:
  * Tokenized Checkout Flow (grant-token -> create -> redirect -> execute -> query):
  * 1. POST /tokenized/checkout/token/grant with app_key & app_secret in body and username/password in headers -> id_token.
  * 2. POST /tokenized/checkout/create with mode="0011", payerReference, callbackURL, amount, currency="BDT", intent="sale", merchantInvoiceNumber -> bkashURL & paymentID.
  * 3. Redirect customer to bkashURL to enter wallet number, OTP, and PIN.
  * 4. On callback with paymentID & status=success, POST /tokenized/checkout/execute with { paymentID } using Bearer id_token.
  * 5. If execute times out or is uncertain, POST /tokenized/checkout/payment/status with { paymentID } to verify transactionStatus === "Completed".
- * Note: Not wired to live/sandbox because bKash sandbox requires Merchant Integration Portal approval and live requires Trade License, TIN, Bank Account, and IP whitelisting.
+ * Requires bKash Merchant Integration Portal approval (sandbox) or Trade License, TIN,
+ * Bank Account and IP whitelisting (live) — owner action.
  */
-class BkashStubBillingProvider implements BillingProvider {
-  async createCheckout(): Promise<CheckoutSessionResult> {
-    throw new AppError(
-      501,
-      ERROR_CODES.NOT_CONFIGURED,
-      'bKash Tokenized Checkout requires merchant portal onboarding and IP whitelisting. Use SSLCommerz Sandbox or Stripe Test Mode for the demo.',
-    );
-  }
-
-  async handleWebhook(): Promise<{ processed: boolean; duplicate: boolean; tranId: string }> {
-    throw new AppError(501, ERROR_CODES.NOT_CONFIGURED, 'bKash webhook stub not configured');
-  }
-
-  async getSubscription(): Promise<unknown> {
-    return null;
-  }
-}
 
 const sslCommerzProvider: BillingProvider = new SslCommerzBillingProvider();
 const stripeProvider: BillingProvider = new StripeTestBillingProvider();
-const bkashStubProvider: BillingProvider = new BkashStubBillingProvider();
 
 export const billingRouter = Router();
 
@@ -834,6 +860,9 @@ async function handleSslCommerzFail(
   next: import('express').NextFunction,
 ): Promise<void> {
   try {
+    if (req.method === 'POST' && !req.headers.authorization) {
+      throw AppError.unauthorized('Authenticated payment owner or gateway proof required');
+    }
     const tranId = String((req.body as { tran_id?: string })?.tran_id ?? req.query.tran_id ?? '');
     if (!tranId) {
       throw AppError.badRequest('Missing tran_id parameter');
@@ -870,6 +899,9 @@ async function handleSslCommerzCancel(
   next: import('express').NextFunction,
 ): Promise<void> {
   try {
+    if (req.method === 'POST' && !req.headers.authorization) {
+      throw AppError.unauthorized('Authenticated payment owner or gateway proof required');
+    }
     const tranId = String((req.body as { tran_id?: string })?.tran_id ?? req.query.tran_id ?? '');
     if (!tranId) {
       throw AppError.badRequest('Missing tran_id parameter');
@@ -1105,20 +1137,8 @@ billingRouter.post(
   },
 );
 
-// POST /api/v1/billing/bkash/init (stub)
-billingRouter.post('/bkash/init', requirePermission('billing:write'), async (req, res, next) => {
-  try {
-    await bkashStubProvider.createCheckout(
-      req.tenant!,
-      { name: req.user!.name, email: req.user!.email },
-      'pro',
-      parseBillingPeriod(req.body),
-    );
-    res.status(501).json({});
-  } catch (err) {
-    next(err);
-  }
-});
+// POST /api/v1/billing/bkash/init intentionally NOT registered: bKash is not onboarded and
+// no bKash pay button exists in the UI. Never expose a payable-looking stub endpoint.
 
 // POST /api/v1/billing/reconcile
 billingRouter.post('/reconcile', requirePermission('billing:write'), async (_req, res, next) => {

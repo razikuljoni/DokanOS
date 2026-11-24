@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CloudOff, Download, Eye, Plus, Printer, RotateCcw, Search, X } from 'lucide-react';
@@ -10,6 +10,7 @@ import { getTenantSnapshot, saveTenantSnapshot } from '@/lib/offlineCache';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
+  ConfirmDialog,
   DataTable,
   ThermalReceipt,
   type DataTableColumn,
@@ -25,6 +26,7 @@ interface SaleRecord {
     productId: string;
     name: string;
     qty: number;
+    returnedQty?: number;
     price: number;
     lineTotal: number;
   }>;
@@ -55,13 +57,37 @@ export function SalesListPage(): React.ReactElement {
   const [viewMode, setViewMode] = useState<'thermal' | 'ledger'>('thermal');
   const [paperWidth, setPaperWidth] = useState<ThermalPaperWidth>('80mm');
   const [isExportingCsv, setIsExportingCsv] = useState(false);
+  const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
+  const [returnConfirmation, setReturnConfirmation] = useState<Array<{
+    productId: string;
+    qty: number;
+  }> | null>(null);
+  const [returnMode, setReturnMode] = useState(false);
 
   const isOffline = useIsOffline();
   const canReturn = user?.role === 'owner' || user?.role === 'manager';
 
+  useEffect(() => {
+    if (!selectedSale) {
+      setReturnQuantities({});
+      setReturnMode(false);
+      return;
+    }
+
+    setReturnQuantities(
+      Object.fromEntries(
+        selectedSale.items.map((item) => [
+          item.productId,
+          Math.max(0, item.qty - (item.returnedQty ?? 0)),
+        ]),
+      ),
+    );
+  }, [selectedSale]);
+
   const handleQuickPrint = (sale: SaleRecord): void => {
     setSelectedSale(sale);
     setViewMode('thermal');
+    setReturnMode(false);
     window.setTimeout(() => {
       window.print();
     }, 60);
@@ -183,8 +209,16 @@ export function SalesListPage(): React.ReactElement {
   };
 
   const { data, isLoading } = useQuery({
-    queryKey: ['sales', tenant?.id, { page, search, statusFilter, mode: isOffline ? 'offline' : 'online' }],
-    queryFn: async (): Promise<{ data: SaleRecord[]; meta?: PaginationMeta; fromCache?: boolean }> => {
+    queryKey: [
+      'sales',
+      tenant?.id,
+      { page, search, statusFilter, mode: isOffline ? 'offline' : 'online' },
+    ],
+    queryFn: async (): Promise<{
+      data: SaleRecord[];
+      meta?: PaginationMeta;
+      fromCache?: boolean;
+    }> => {
       if (!tenant?.id) return { data: [] };
 
       if (isOffline) {
@@ -230,9 +264,16 @@ export function SalesListPage(): React.ReactElement {
   });
 
   const returnMutation = useMutation({
-    mutationFn: async (saleId: string) => {
+    mutationFn: async ({
+      saleId,
+      items,
+    }: {
+      saleId: string;
+      items: Array<{ productId: string; qty: number }>;
+    }) => {
       return apiFetch<{ data: SaleRecord }>(`/api/v1/sales/${saleId}/return`, {
         method: 'POST',
+        body: JSON.stringify({ items }),
       });
     },
     onSuccess: (res) => {
@@ -292,18 +333,22 @@ export function SalesListPage(): React.ReactElement {
       header: 'Payment / Status',
       render: (row) => (
         <span className="text-xs">
-          <span className="uppercase text-muted-foreground">{row.paymentMethod}</span>
-          <span aria-hidden="true"> · </span>
+          <span className="uppercase text-muted-foreground">
+            {row.isReturned ? 'RETURNED' : row.paymentMethod}
+          </span>
+          {!row.isReturned && <span aria-hidden="true"> · </span>}
           <span
             className={
-              row.paymentStatus === 'paid'
-                ? 'text-primary font-medium'
-                : row.paymentStatus === 'partial'
-                  ? 'text-warning font-medium'
-                  : 'text-destructive font-medium'
+              row.isReturned
+                ? 'text-destructive font-medium'
+                : row.paymentStatus === 'paid'
+                  ? 'text-primary font-medium'
+                  : row.paymentStatus === 'partial'
+                    ? 'text-warning font-medium'
+                    : 'text-destructive font-medium'
             }
           >
-            {row.paymentStatus.toUpperCase()}
+            {row.isReturned ? 'RETURNED' : row.paymentStatus.toUpperCase()}
           </span>
         </span>
       ),
@@ -353,11 +398,26 @@ export function SalesListPage(): React.ReactElement {
             onClick={() => {
               setSelectedSale(row);
               setViewMode('thermal');
+              setReturnMode(false);
             }}
           >
             <Eye className="h-3.5 w-3.5" />
             View
           </Button>
+          {canReturn && row.paymentStatus === 'paid' && !row.isReturned && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setSelectedSale(row);
+                setViewMode('ledger');
+                setReturnMode(true);
+              }}
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Return
+            </Button>
+          )}
         </div>
       ),
     },
@@ -445,196 +505,249 @@ export function SalesListPage(): React.ReactElement {
 
       {/* Sale Detail Invoice Drawer / Modal */}
       {selectedSale && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-end">
-          <div className="bg-card border-l border-border h-full max-w-lg w-full p-6 flex flex-col justify-between overflow-y-auto">
-            <div className="space-y-5">
-              <div className="flex items-start justify-between border-b border-border pb-4 no-print">
-                <div>
-                  <h3 className="font-display text-lg font-bold">
-                    Invoice {selectedSale.invoiceNo}
-                  </h3>
-                  <p className="text-xs text-muted-foreground">
-                    {formatDateDhaka(selectedSale.createdAt)} · Customer:{' '}
-                    {selectedSale.customerName}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setSelectedSale(null)}
-                  className="p-1.5 rounded-md text-muted-foreground hover:text-foreground cursor-pointer"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
-              {/* View Mode & Thermal Roll Width Controls */}
-              <div className="flex flex-wrap items-center justify-between gap-2 no-print">
-                <div className="inline-flex items-center gap-1 p-1 bg-secondary rounded-md">
+        <>
+          <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-end">
+            <div className="bg-card border-l border-border h-full max-w-lg w-full p-6 flex flex-col justify-between overflow-y-auto">
+              <div className="space-y-5">
+                <div className="flex items-start justify-between border-b border-border pb-4 no-print">
+                  <div>
+                    <h3 className="font-display text-lg font-bold">
+                      Invoice {selectedSale.invoiceNo}
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      {formatDateDhaka(selectedSale.createdAt)} · Customer:{' '}
+                      {selectedSale.customerName}
+                    </p>
+                  </div>
                   <button
                     type="button"
-                    onClick={() => setViewMode('thermal')}
-                    className={`px-2.5 py-1 text-xs font-medium rounded transition-colors cursor-pointer ${
-                      viewMode === 'thermal'
-                        ? 'bg-card text-foreground shadow-2xs'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
+                    onClick={() => {
+                      setSelectedSale(null);
+                      setReturnMode(false);
+                    }}
+                    className="p-1.5 rounded-md text-muted-foreground hover:text-foreground cursor-pointer"
                   >
-                    Thermal Receipt
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setViewMode('ledger')}
-                    className={`px-2.5 py-1 text-xs font-medium rounded transition-colors cursor-pointer ${
-                      viewMode === 'ledger'
-                        ? 'bg-card text-foreground shadow-2xs'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    Ledger Details
+                    <X className="h-4 w-4" />
                   </button>
                 </div>
 
-                <div
-                  className="inline-flex items-center rounded border border-border bg-secondary p-0.5 text-xs"
-                  role="group"
-                  aria-label="Thermal paper width"
-                >
-                  {(['80mm', '58mm'] as const).map((width) => (
+                {/* View Mode & Thermal Roll Width Controls */}
+                <div className="flex flex-wrap items-center justify-between gap-2 no-print">
+                  <div className="inline-flex items-center gap-1 p-1 bg-secondary rounded-md">
                     <button
-                      key={width}
                       type="button"
-                      onClick={() => setPaperWidth(width)}
-                      className={`px-2 py-0.5 font-mono rounded-xs transition-colors cursor-pointer ${
-                        paperWidth === width
-                          ? 'bg-card text-foreground font-semibold shadow-2xs'
+                      onClick={() => setViewMode('thermal')}
+                      className={`px-2.5 py-1 text-xs font-medium rounded transition-colors cursor-pointer ${
+                        viewMode === 'thermal'
+                          ? 'bg-card text-foreground shadow-2xs'
                           : 'text-muted-foreground hover:text-foreground'
                       }`}
                     >
-                      {width}
+                      Thermal Receipt
                     </button>
-                  ))}
+                    <button
+                      type="button"
+                      onClick={() => setViewMode('ledger')}
+                      className={`px-2.5 py-1 text-xs font-medium rounded transition-colors cursor-pointer ${
+                        viewMode === 'ledger'
+                          ? 'bg-card text-foreground shadow-2xs'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      Ledger Details
+                    </button>
+                  </div>
+
+                  <div
+                    className="inline-flex items-center rounded border border-border bg-secondary p-0.5 text-xs"
+                    role="group"
+                    aria-label="Thermal paper width"
+                  >
+                    {(['80mm', '58mm'] as const).map((width) => (
+                      <button
+                        key={width}
+                        type="button"
+                        onClick={() => setPaperWidth(width)}
+                        className={`px-2 py-0.5 font-mono rounded-xs transition-colors cursor-pointer ${
+                          paperWidth === width
+                            ? 'bg-card text-foreground font-semibold shadow-2xs'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        {width}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
 
-              {/* Thermal Receipt View (Always mounted in DOM so @media print captures it) */}
-              <div
-                className={
-                  viewMode === 'thermal'
-                    ? 'py-3 px-2 rounded-md border border-border bg-secondary/40'
-                    : 'thermal-print-only'
-                }
-              >
-                <ThermalReceipt
-                  sale={selectedSale}
-                  shopName={tenant?.name}
-                  shopType={tenant?.type}
-                  shopSlug={tenant?.slug}
-                  cashierName={selectedSale.soldBy?.name ?? 'Counter Staff'}
-                  paperWidth={paperWidth}
-                />
-              </div>
+                {/* Thermal Receipt View (Always mounted in DOM so @media print captures it) */}
+                <div
+                  className={
+                    viewMode === 'thermal'
+                      ? 'py-3 px-2 rounded-md border border-border bg-secondary/40'
+                      : 'thermal-print-only'
+                  }
+                >
+                  <ThermalReceipt
+                    sale={selectedSale}
+                    shopName={tenant?.name}
+                    shopType={tenant?.type}
+                    shopSlug={tenant?.slug}
+                    cashierName={selectedSale.soldBy?.name ?? 'Counter Staff'}
+                    paperWidth={paperWidth}
+                  />
+                </div>
 
-              {viewMode === 'ledger' && (
-                <div className="space-y-4 no-print">
-                  <div className="space-y-2">
-                    <div className="text-xs font-medium text-muted-foreground">Line Items</div>
-                    <div className="rounded-md border border-border divide-y divide-border">
-                      {selectedSale.items.map((item, idx) => (
-                        <div
-                          key={idx}
-                          className="p-3 flex items-center justify-between text-xs"
-                        >
-                          <div>
-                            <div className="font-medium text-foreground">{item.name}</div>
-                            <div className="text-muted-foreground font-mono tabular-nums">
-                              {formatBDT(item.price)} × {item.qty}
+                {viewMode === 'ledger' && (
+                  <div className="space-y-4 no-print">
+                    <div className="space-y-2">
+                      <div className="text-xs font-medium text-muted-foreground">Line Items</div>
+                      <div className="rounded-md border border-border divide-y divide-border">
+                        {selectedSale.items.map((item, idx) => (
+                          <div key={idx} className="p-3 flex items-center justify-between text-xs">
+                            <div>
+                              <div className="font-medium text-foreground">{item.name}</div>
+                              <div className="text-muted-foreground font-mono tabular-nums">
+                                {formatBDT(item.price)} × {item.qty}
+                              </div>
+                            </div>
+                            <div className="font-mono font-semibold tabular-nums">
+                              {formatBDT(item.lineTotal)}
                             </div>
                           </div>
-                          <div className="font-mono font-semibold tabular-nums">
-                            {formatBDT(item.lineTotal)}
-                          </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="rounded-md border border-border bg-secondary/50 p-4 space-y-1.5 text-xs">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Subtotal</span>
-                      <span className="font-mono tabular-nums">
-                        {formatBDT(selectedSale.subtotal)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Discount</span>
-                      <span className="font-mono tabular-nums">
-                        −{formatBDT(selectedSale.discount)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between font-semibold text-sm pt-1 border-t border-border">
-                      <span>Total</span>
-                      <span className="font-mono tabular-nums">
-                        {formatBDT(selectedSale.total)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-muted-foreground">
-                      <span>Paid ({selectedSale.paymentMethod.toUpperCase()})</span>
-                      <span className="font-mono tabular-nums">
-                        {formatBDT(selectedSale.paidAmount)}
-                      </span>
-                    </div>
-                    {selectedSale.dueAmount > 0 && (
-                      <div className="flex justify-between text-warning font-medium">
-                        <span>Remaining Baki Due</span>
+                    <div className="rounded-md border border-border bg-secondary/50 p-4 space-y-1.5 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Subtotal</span>
                         <span className="font-mono tabular-nums">
-                          {formatBDT(selectedSale.dueAmount)}
+                          {formatBDT(selectedSale.subtotal)}
                         </span>
                       </div>
-                    )}
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Discount</span>
+                        <span className="font-mono tabular-nums">
+                          −{formatBDT(selectedSale.discount)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between font-semibold text-sm pt-1 border-t border-border">
+                        <span>Total</span>
+                        <span className="font-mono tabular-nums">
+                          {formatBDT(selectedSale.total)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Paid ({selectedSale.paymentMethod.toUpperCase()})</span>
+                        <span className="font-mono tabular-nums">
+                          {formatBDT(selectedSale.paidAmount)}
+                        </span>
+                      </div>
+                      {selectedSale.dueAmount > 0 && (
+                        <div className="flex justify-between text-warning font-medium">
+                          <span>Remaining Baki Due</span>
+                          <span className="font-mono tabular-nums">
+                            {formatBDT(selectedSale.dueAmount)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
 
-            <div className="flex items-center justify-between gap-3 pt-4 border-t border-border no-print">
-              {canReturn &&
-              selectedSale.paymentStatus === 'paid' &&
-              !selectedSale.isReturned ? (
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  disabled={returnMutation.isPending}
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        `Are you sure you want to return invoice ${selectedSale.invoiceNo} and restock all items back into shop inventory?`,
-                      )
-                    ) {
-                      returnMutation.mutate(selectedSale._id);
-                    }
-                  }}
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                  {returnMutation.isPending ? 'Restocking...' : 'Return & Restock'}
-                </Button>
-              ) : (
-                <div className="text-xs text-muted-foreground">
-                  {selectedSale.isReturned ? 'Sale returned & restocked' : ''}
-                </div>
-              )}
+              <div className="flex items-center justify-between gap-3 pt-4 border-t border-border no-print">
+                {canReturn &&
+                returnMode &&
+                selectedSale.paymentStatus === 'paid' &&
+                !selectedSale.isReturned ? (
+                  <div className="space-y-2">
+                    <div className="text-xs font-medium text-muted-foreground">
+                      Return quantities
+                    </div>
+                    <div className="space-y-1">
+                      {selectedSale.items.map((item) => {
+                        const remaining = item.qty - (item.returnedQty ?? 0);
+                        return (
+                          <label
+                            key={item.productId}
+                            className="flex items-center justify-between gap-3 text-xs"
+                          >
+                            <span>
+                              {item.name} (max {remaining})
+                            </span>
+                            <Input
+                              className="h-8 w-20 text-right"
+                              type="number"
+                              min={0}
+                              max={remaining}
+                              value={returnQuantities[item.productId] ?? 0}
+                              onChange={(event) =>
+                                setReturnQuantities((current) => ({
+                                  ...current,
+                                  [item.productId]: Math.min(
+                                    remaining,
+                                    Math.max(0, Number(event.target.value)),
+                                  ),
+                                }))
+                              }
+                            />
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      disabled={
+                        returnMutation.isPending ||
+                        Object.values(returnQuantities).every((qty) => qty < 1)
+                      }
+                      onClick={() => {
+                        const items = Object.entries(returnQuantities)
+                          .filter(([, qty]) => qty > 0)
+                          .map(([productId, qty]) => ({ productId, qty }));
+                        setReturnConfirmation(items);
+                      }}
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      {returnMutation.isPending ? 'Restocking...' : 'Confirm Return'}
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="text-xs text-muted-foreground">
+                    {selectedSale.isReturned ? 'Sale returned & restocked' : ''}
+                  </div>
+                )}
 
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => window.print()}>
-                  <Printer className="h-3.5 w-3.5" />
-                  Print Thermal Receipt
-                </Button>
-                <Button size="sm" onClick={() => setSelectedSale(null)}>
-                  Close
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => window.print()}>
+                    <Printer className="h-3.5 w-3.5" />
+                    Print Thermal Receipt
+                  </Button>
+                  <Button size="sm" onClick={() => setSelectedSale(null)}>
+                    Close
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+          <ConfirmDialog
+            open={returnConfirmation !== null}
+            title="Confirm return"
+            description={`Return selected quantities from invoice ${selectedSale.invoiceNo} and restock inventory?`}
+            confirmLabel="Return & Restock"
+            destructive
+            onCancel={() => setReturnConfirmation(null)}
+            onConfirm={() => {
+              if (returnConfirmation) {
+                returnMutation.mutate({ saleId: selectedSale._id, items: returnConfirmation });
+              }
+              setReturnConfirmation(null);
+            }}
+          />
+        </>
       )}
     </div>
   );

@@ -53,7 +53,10 @@ export const saleItemInputSchema = z.object({
 });
 
 export const createSaleSchema = z.object({
-  items: z.array(saleItemInputSchema).min(1, 'At least one item is required').max(100, 'Cannot exceed 100 items per sale'),
+  items: z
+    .array(saleItemInputSchema)
+    .min(1, 'At least one item is required')
+    .max(100, 'Cannot exceed 100 items per sale'),
   discount: z.number().nonnegative('Discount cannot be negative').default(0),
   paymentMethod: z.enum(PAYMENT_METHODS),
   paidAmount: z.number().nonnegative('Paid amount cannot be negative'),
@@ -61,6 +64,10 @@ export const createSaleSchema = z.object({
   customerPhone: z.string().trim().max(25).optional(),
   customerId: z.string().optional(),
   idempotencyKey: z.string().trim().min(8).max(128).optional(),
+});
+
+export const returnSaleSchema = z.object({
+  items: z.array(saleItemInputSchema).min(1, 'At least one item is required').max(100),
 });
 
 export const purchaseItemInputSchema = z.object({
@@ -71,7 +78,10 @@ export const purchaseItemInputSchema = z.object({
 
 export const createPurchaseSchema = z.object({
   supplierId: z.string().min(1, 'Supplier is required'),
-  items: z.array(purchaseItemInputSchema).min(1, 'At least one item is required').max(100, 'Cannot exceed 100 items per purchase'),
+  items: z
+    .array(purchaseItemInputSchema)
+    .min(1, 'At least one item is required')
+    .max(100, 'Cannot exceed 100 items per purchase'),
   paidAmount: z.number().nonnegative('Paid amount cannot be negative'),
 });
 
@@ -145,4 +155,3 @@ export const createCustomerSchema = z.object({
 });
 
 export const updateCustomerSchema = createCustomerSchema.partial();
-

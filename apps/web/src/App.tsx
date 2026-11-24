@@ -228,6 +228,7 @@ export default function App(): React.ReactElement {
               <Route path="/app" element={<ProtectedAppRoutes />}>
                 <Route index element={<Navigate to="/app/dashboard" replace />} />
                 <Route path="dashboard" element={<DashboardPage />} />
+                <Route path="pos" element={<Navigate to="/app/sales/new" replace />} />
                 <Route path="sales/new" element={<PosPage />} />
                 <Route path="sales" element={<SalesListPage />} />
                 <Route path="customers" element={<CustomersPage />} />

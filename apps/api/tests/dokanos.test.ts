@@ -1485,6 +1485,90 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
     expect(replayAccept.status).toBe(400);
   });
 
+  it('Phase 2: invite tokens are hash-only and resend rotates the setup link', async () => {
+    const shop = await registerShop({
+      shopName: 'Invite Hash Shop',
+      email: 'owner@invite-hash.bd',
+    });
+
+    const inviteRes = await request(app)
+      .post('/api/v1/users/invite')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({ name: 'Hash Staff', email: 'hash-staff@invite-hash.bd', role: 'staff' });
+    expect(inviteRes.status).toBe(201);
+    const firstToken = new URL(inviteRes.body.data.setupLink).searchParams.get('token');
+    expect(firstToken).toBeTruthy();
+
+    const invited = await UserModel.findOne({ email: 'hash-staff@invite-hash.bd' }).select(
+      '+inviteToken',
+    );
+    expect(invited?.inviteToken).toBeNull();
+    expect(invited?.inviteTokenHash).toBeDefined();
+
+    const resendRes = await request(app)
+      .post(`/api/v1/users/${invited!._id.toString()}/resend-invite`)
+      .set('Authorization', `Bearer ${shop.accessToken}`);
+    expect(resendRes.status).toBe(200);
+    const secondToken = new URL(resendRes.body.data.setupLink).searchParams.get('token');
+    expect(secondToken).toBeTruthy();
+    expect(secondToken).not.toBe(firstToken);
+
+    const oldAccept = await request(app)
+      .post('/api/v1/auth/accept-invite')
+      .send({ inviteToken: firstToken, password: 'ChosenPassword123!' });
+    expect(oldAccept.status).toBe(400);
+
+    const rawFallbackUser = await UserModel.findOne({ email: 'hash-staff@invite-hash.bd' });
+    rawFallbackUser!.inviteToken = secondToken;
+    rawFallbackUser!.inviteTokenHash = null;
+    await rawFallbackUser!.save();
+    const rawFallbackAccept = await request(app)
+      .post('/api/v1/auth/accept-invite')
+      .send({ inviteToken: secondToken, password: 'ChosenPassword123!' });
+    expect(rawFallbackAccept.status).toBe(400);
+  });
+
+  it('Phase 2: unverified owners cannot change tenant settings until verified', async () => {
+    const shop = await registerShop({ shopName: 'Verify Gate Shop', email: 'owner@verify-gate.bd' });
+
+    const blocked = await request(app)
+      .patch('/api/v1/tenants/me')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({ name: 'Blocked Shop' });
+    expect(blocked.status).toBe(403);
+    expect(blocked.body.error.message).toContain('verify your email');
+
+    await UserModel.updateOne({ _id: shop.userId }, { $set: { emailVerified: true } });
+    const allowed = await request(app)
+      .patch('/api/v1/tenants/me')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({ name: 'Verified Shop' });
+    expect(allowed.status).toBe(200);
+    expect(allowed.body.data.name).toBe('Verified Shop');
+  });
+
+  it('Phase 2: unauthenticated SSLCommerz fail and cancel callbacks cannot mutate payment', async () => {
+    const shop = await registerShop({ shopName: 'Callback Guard Shop', email: 'owner@callback-guard.bd' });
+    const initRes = await request(app)
+      .post('/api/v1/billing/sslcommerz/init')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({});
+    expect(initRes.status).toBe(201);
+    const tranId = initRes.body.data.tranId as string;
+
+    const failRes = await request(app)
+      .post('/api/v1/billing/sslcommerz/fail')
+      .send({ tran_id: tranId });
+    expect(failRes.status).toBe(401);
+    expect((await PaymentModel.findOne({ eventId: tranId }))?.status).toBe('pending');
+
+    const cancelRes = await request(app)
+      .post('/api/v1/billing/sslcommerz/cancel')
+      .send({ tran_id: tranId });
+    expect(cancelRes.status).toBe(401);
+    expect((await PaymentModel.findOne({ eventId: tranId }))?.status).toBe('pending');
+  });
+
   // 25. Phase 4 — Tenant Login Isolation & Wrong Slug 404 (H3)
   it('25. Phase 4 Tenant Isolation: Login with nonexistent tenantSlug returns 404 Shop Not Found', async () => {
     await registerShop({
@@ -1644,8 +1728,98 @@ describe('DokanOS §9 Integration & Security Suite (Vitest + Supertest + MongoMe
     expect(foreignSupPatch.body.error.message).toContain('Supplier not found in this shop');
   });
 
-  // 29. Phase 5 — Purchase Cost Change Audit
-  it('29. Phase 5 Purchase Cost Audit: cost price changes trigger product.cost_changed audit log and purchase.created', async () => {
+it("29. Product edit excludes stock while direct stock PATCH remains rejected", async () => {
+  const shop = await registerShop({
+    shopName: "Product Edit Shop",
+    email: "product-edit@dokanos.bd",
+  });
+  const productRes = await request(app)
+    .post("/api/v1/products")
+    .set("Authorization", `Bearer ${shop.accessToken}`)
+    .send({
+      name: "Edit Me",
+      category: "General",
+      unit: "pcs",
+      costPrice: 10,
+      sellPrice: 15,
+      stock: 5,
+      sku: "EDIT-ME",
+    });
+  expect(productRes.status).toBe(201);
+  const productId = productRes.body.data._id as string;
+
+  const editRes = await request(app)
+    .patch(`/api/v1/products/${productId}`)
+    .set("Authorization", `Bearer ${shop.accessToken}`)
+    .send({ sellPrice: 18 });
+  expect(editRes.status).toBe(200);
+  expect(editRes.body.data.sellPrice).toBe(18);
+  expect((await ProductModel.findById(productId))?.stock).toBe(5);
+
+  const stockRes = await request(app)
+    .patch(`/api/v1/products/${productId}`)
+    .set("Authorization", `Bearer ${shop.accessToken}`)
+    .send({ stock: 99 });
+  expect(stockRes.status).toBe(400);
+  expect((await ProductModel.findById(productId))?.stock).toBe(5);
+});
+
+it("30. Partial returns accumulate, restock returned quantities, and mark fully returned only at completion", async () => {
+  const shop = await registerShop({
+    shopName: "Returns Shop",
+    email: "returns@dokanos.bd",
+  });
+  const productRes = await request(app)
+    .post("/api/v1/products")
+    .set("Authorization", `Bearer ${shop.accessToken}`)
+    .send({
+      name: "Return Product",
+      category: "General",
+      unit: "pcs",
+      costPrice: 10,
+      sellPrice: 20,
+      stock: 2,
+      sku: "RETURN-001",
+    });
+  const productId = productRes.body.data._id as string;
+  const saleRes = await request(app)
+    .post("/api/v1/sales")
+    .set("Authorization", `Bearer ${shop.accessToken}`)
+    .send({
+      items: [{ productId, qty: 2 }],
+      paymentMethod: "cash",
+      paidAmount: 40,
+    });
+  expect(saleRes.status).toBe(201);
+  const saleId = saleRes.body.data._id as string;
+
+  const firstReturn = await request(app)
+    .post(`/api/v1/sales/${saleId}/return`)
+    .set("Authorization", `Bearer ${shop.accessToken}`)
+    .send({ items: [{ productId, qty: 1 }] });
+  expect(firstReturn.status).toBe(200);
+  expect(firstReturn.body.data.isReturned).toBe(false);
+  expect(firstReturn.body.data.items[0].returnedQty).toBe(1);
+  expect((await ProductModel.findById(productId))?.stock).toBe(1);
+
+  const secondReturn = await request(app)
+    .post(`/api/v1/sales/${saleId}/return`)
+    .set("Authorization", `Bearer ${shop.accessToken}`)
+    .send({ items: [{ productId, qty: 1 }] });
+  expect(secondReturn.status).toBe(200);
+  expect(secondReturn.body.data.isReturned).toBe(true);
+  expect(secondReturn.body.data.items[0].returnedQty).toBe(2);
+  expect((await ProductModel.findById(productId))?.stock).toBe(2);
+
+  const overReturn = await request(app)
+    .post(`/api/v1/sales/${saleId}/return`)
+    .set("Authorization", `Bearer ${shop.accessToken}`)
+    .send({ items: [{ productId, qty: 1 }] });
+  expect(overReturn.status).toBe(400);
+});
+
+  // 31. Phase 5 — Purchase Cost Change Audit
+  it('31. Phase 5 Purchase Cost Audit: cost price changes trigger product.cost_changed audit log and purchase.created', async () => {
     const shop = await registerShop({
       shopName: 'Purchase Audit Shop',
       email: 'purchaseaudit@dokanos.bd',

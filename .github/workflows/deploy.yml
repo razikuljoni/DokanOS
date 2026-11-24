@@ -15,7 +15,6 @@ jobs:
   deploy:
     name: Trigger Render Deploy Hook & Smoke Check
     runs-on: ubuntu-latest
-    if: ${{ secrets.RENDER_DEPLOY_HOOK_URL != '' }}
 
     steps:
       - name: Trigger Render Free Web Service Deploy Hook

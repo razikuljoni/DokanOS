@@ -22,6 +22,10 @@ export class ApiClientError extends Error {
 
 let refreshPromise: Promise<string | null> | null = null;
 
+// Default request timeout to prevent requests from hanging forever if the server
+// is down, stuck on a slow third-party API, or a connection is dropped silently.
+const DEFAULT_TIMEOUT_MS = 15000;
+
 export async function tryRefreshSession(): Promise<string | null> {
   if (refreshPromise) return refreshPromise;
 
@@ -78,11 +82,28 @@ export async function apiFetch<T>(
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  let response = await fetch(path, {
-    ...rest,
-    headers,
-    credentials: 'include',
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...rest,
+      headers,
+      credentials: 'include',
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new ApiClientError(
+        408,
+        'TIMEOUT',
+        'Request timed out: the server took longer than 15 seconds to respond. Please check your internet connection or try again.',
+      );
+    }
+    throw err;
+  }
 
   if (response.status === 401 && !skipAuthRefresh && !path.includes('/auth/login')) {
     const newToken = await tryRefreshSession();
@@ -92,9 +113,11 @@ export async function apiFetch<T>(
         ...rest,
         headers,
         credentials: 'include',
+        signal: controller.signal,
       });
     }
   }
+  clearTimeout(timeoutId);
 
   if (!response.ok) {
     let errorCode: ErrorCode = 'INTERNAL_ERROR';

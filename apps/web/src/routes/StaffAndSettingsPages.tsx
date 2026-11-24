@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  AlertTriangle,
   Check,
   CheckCircle2,
   Clock,
@@ -59,6 +58,7 @@ export function StaffPage(): React.ReactElement {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<'manager' | 'staff'>('staff');
   const [lastSetupLink, setLastSetupLink] = useState<string | null>(null);
+  const [lastInviteUserId, setLastInviteUserId] = useState<string | null>(null);
 
   const { data: usersRes, isLoading } = useQuery({
     queryKey: ['users', tenant?.id],
@@ -79,6 +79,7 @@ export function StaffPage(): React.ReactElement {
       setName('');
       setEmail('');
       setLastSetupLink(res.data.setupLink);
+      setLastInviteUserId(res.data._id);
       void queryClient.invalidateQueries({ queryKey: ['users', tenant?.id] });
       addToast({
         title: 'Staff Invited',
@@ -92,6 +93,26 @@ export function StaffPage(): React.ReactElement {
         description: err instanceof Error ? err.message : 'Check plan staff limits',
         variant: 'danger',
       });
+    },
+  });
+
+  const resendInviteMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      return apiFetch<{ data: { setupLink: string; email: string } }>(
+        `/api/v1/users/${userId}/resend-invite`,
+        { method: 'POST' },
+      );
+    },
+    onSuccess: (res) => {
+      setLastSetupLink(res.data.setupLink);
+      addToast({
+        title: 'Invite Resent',
+        description: `New setup link for ${res.data.email}`,
+        variant: 'success',
+      });
+    },
+    onError: (err) => {
+      addToast({ title: 'Resend Failed', description: formatErrorMessage(err), variant: 'danger' });
     },
   });
 
@@ -172,11 +193,7 @@ export function StaffPage(): React.ReactElement {
             >
               {row.status === 'disabled' ? 'Enable' : 'Disable'}
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => deleteStaffMutation.mutate(row._id)}
-            >
+            <Button variant="ghost" size="sm" onClick={() => deleteStaffMutation.mutate(row._id)}>
               <Trash2 className="h-3.5 w-3.5 text-destructive" />
             </Button>
           </div>
@@ -306,9 +323,36 @@ export function StaffPage(): React.ReactElement {
               </Button>
 
               {lastSetupLink && (
-                <div className="p-3 rounded-md border border-border bg-secondary/50 space-y-1 text-xs">
+                <div className="p-3 rounded-md border border-border bg-secondary/50 space-y-2 text-xs">
                   <div className="font-semibold text-primary">One-Time Setup Link Ready:</div>
                   <div className="font-mono break-all text-muted-foreground">{lastSetupLink}</div>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="flex-1 text-xs"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(lastSetupLink);
+                        addToast({ title: 'Link copied', variant: 'success' });
+                      }}
+                    >
+                      Copy Link
+                    </Button>
+                    {lastInviteUserId && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 text-xs"
+                        disabled={resendInviteMutation.isPending}
+                        onClick={() => resendInviteMutation.mutate(lastInviteUserId)}
+                      >
+                        <RefreshCw className="h-3 w-3 mr-1" />
+                        Resend
+                      </Button>
+                    )}
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -454,6 +498,7 @@ export function SettingsPage(): React.ReactElement {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'manager' | 'staff'>('staff');
   const [lastSetupLink, setLastSetupLink] = useState<string | null>(null);
+  const [lastInviteUserId, setLastInviteUserId] = useState<string | null>(null);
   const [showAllPermissions, setShowAllPermissions] = useState(false);
 
   // Change Password state
@@ -650,6 +695,7 @@ export function SettingsPage(): React.ReactElement {
       setInviteName('');
       setInviteEmail('');
       setLastSetupLink(res.data.setupLink);
+      setLastInviteUserId(res.data._id);
       void queryClient.invalidateQueries({ queryKey: ['users', tenant?.id] });
       void queryClient.invalidateQueries({ queryKey: ['tenant-usage', tenant?.id] });
       void queryClient.invalidateQueries({ queryKey: ['tenant-audit-logs', tenant?.id] });
@@ -665,6 +711,27 @@ export function SettingsPage(): React.ReactElement {
         description: formatErrorMessage(err),
         variant: 'danger',
       });
+    },
+  });
+
+  // PATCH /api/v1/users/:id/resend-invite
+  const resendInviteMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      return apiFetch<{ data: { setupLink: string; email: string } }>(
+        `/api/v1/users/${userId}/resend-invite`,
+        { method: 'POST' },
+      );
+    },
+    onSuccess: (res) => {
+      setLastSetupLink(res.data.setupLink);
+      addToast({
+        title: 'Invite Resent',
+        description: `New setup link for ${res.data.email}`,
+        variant: 'success',
+      });
+    },
+    onError: (err) => {
+      addToast({ title: 'Resend Failed', description: formatErrorMessage(err), variant: 'danger' });
     },
   });
 
@@ -846,9 +913,7 @@ export function SettingsPage(): React.ReactElement {
               }`}
             >
               <span
-                className={`h-1.5 w-1.5 rounded-full ${
-                  isOffline ? 'bg-warning' : 'bg-primary'
-                }`}
+                className={`h-1.5 w-1.5 rounded-full ${isOffline ? 'bg-warning' : 'bg-primary'}`}
                 aria-hidden="true"
               />
               {isOffline ? 'Offline Mode' : 'Store Active • Online'}
@@ -1015,7 +1080,8 @@ export function SettingsPage(): React.ReactElement {
                     disabled={!canWriteTenant}
                     value={threshold}
                     onChange={(e) => {
-                      const val = e.target.value === '' ? 0 : Math.max(0, parseInt(e.target.value, 10) || 0);
+                      const val =
+                        e.target.value === '' ? 0 : Math.max(0, parseInt(e.target.value, 10) || 0);
                       setThreshold(val);
                     }}
                     className="bg-card border-input text-foreground font-mono text-xs tabular-nums"
@@ -1433,18 +1499,45 @@ export function SettingsPage(): React.ReactElement {
             </Button>
 
             {lastSetupLink && (
-              <div className="rounded-lg border border-primary/30 bg-primary/10 p-3 space-y-1 text-xs">
+              <div className="rounded-lg border border-primary/30 bg-primary/10 p-3 space-y-2 text-xs">
                 <div className="font-semibold text-primary">One-Time Setup Link Generated:</div>
                 <div className="font-mono text-[11px] break-all text-foreground">
                   {lastSetupLink}
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="flex-1 text-xs"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(lastSetupLink);
+                      addToast({ title: 'Link copied', variant: 'success' });
+                    }}
+                  >
+                    Copy Link
+                  </Button>
+                  {lastInviteUserId && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="flex-1 text-xs"
+                      disabled={resendInviteMutation.isPending}
+                      onClick={() => resendInviteMutation.mutate(lastInviteUserId)}
+                    >
+                      <RefreshCw className="h-3 w-3 mr-1" />
+                      Resend
+                    </Button>
+                  )}
                 </div>
               </div>
             )}
 
             <p className="text-[11px] text-muted-foreground leading-relaxed">
               Generates a one-time activation link expiring in 7 days where the staff member chooses
-              their own password. Enforced by plan staff limits ({usage?.staffCount ?? (usersRes?.data.length ?? 1)}{' '}
-              / {usage?.maxStaff ?? 1} allocated).
+              their own password. Enforced by plan staff limits (
+              {usage?.staffCount ?? usersRes?.data.length ?? 1} / {usage?.maxStaff ?? 1} allocated).
             </p>
           </CardContent>
         </Card>
@@ -1701,7 +1794,8 @@ export function SettingsPage(): React.ReactElement {
               <span>Security &amp; Password</span>
             </CardTitle>
             <CardDescription className="text-xs text-muted-foreground">
-              Update your account password. Changing password automatically revokes all other active sessions (<code>POST /api/v1/auth/change-password</code>).
+              Update your account password. Changing password automatically revokes all other active
+              sessions (<code>POST /api/v1/auth/change-password</code>).
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-4">
@@ -1751,11 +1845,7 @@ export function SettingsPage(): React.ReactElement {
                 />
               </div>
               <div className="md:col-span-3 flex justify-end">
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={changePasswordMutation.isPending}
-                >
+                <Button type="submit" size="sm" disabled={changePasswordMutation.isPending}>
                   {changePasswordMutation.isPending ? 'Updating...' : 'Update Password'}
                 </Button>
               </div>
@@ -1856,84 +1946,9 @@ export function SettingsPage(): React.ReactElement {
         </CardContent>
       </Card>
 
-      {/* Section 5: Danger Zone (Stitch Section 4 — Visibly Unconnected per Rules) */}
-      <Card
-        aria-labelledby="danger-zone-heading"
-        className="rounded-xl border border-destructive/35 bg-destructive/5 text-card-foreground"
-      >
-        <CardHeader className="pb-3">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4 text-destructive" />
-            <CardTitle
-              id="danger-zone-heading"
-              className="text-base font-bold text-destructive"
-            >
-              Danger Zone
-            </CardTitle>
-            <span className="rounded border border-destructive/30 bg-destructive/10 px-2 py-0.5 font-mono text-[10px] font-semibold text-destructive">
-              Unconnected — Needs Backend
-            </span>
-          </div>
-          <CardDescription className="text-xs text-muted-foreground">
-            Permanent actions affecting shop data, fiscal registers, and branch ownership. Proceed
-            with absolute caution.
-          </CardDescription>
-        </CardHeader>
-
-        <CardContent className="space-y-3">
-          <div className="rounded-lg border border-border bg-card p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="space-y-0.5">
-              <div className="flex items-center gap-2">
-                <h3 className="font-display text-sm font-bold text-foreground">
-                  Transfer Ownership
-                </h3>
-                <span className="rounded border border-warning/30 bg-warning/15 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-warning">
-                  Unconnected — Needs Backend
-                </span>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Transfer complete administrative rights, DGDA trade license verification, and fiscal
-                ledger to another verified DokanOS account.
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled
-              title="Unconnected — POST /api/v1/tenants/me/transfer is not implemented in the backend"
-              className="border-destructive/30 text-destructive"
-            >
-              Transfer ownership
-            </Button>
-          </div>
-
-          <div className="rounded-lg border border-border bg-card p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="space-y-0.5">
-              <div className="flex items-center gap-2">
-                <h3 className="font-display text-sm font-bold text-foreground">Delete Shop</h3>
-                <span className="rounded border border-warning/30 bg-warning/15 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-warning">
-                  Unconnected — Needs Backend
-                </span>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Permanently archive {liveTenant?.name ?? tenant?.name ?? 'shop'} ledger, purge local
-                POS terminal offline caches, and cancel active subscription. This cannot be undone.
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              disabled
-              title="Unconnected — DELETE /api/v1/tenants/me is not implemented in the backend"
-            >
-              Delete shop
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      {/* Section 5: Danger Zone removed — Transfer Ownership / Delete Shop have no backend
+          endpoints (POST /tenants/me/transfer, DELETE /tenants/me are not implemented), and
+          permanently disabled buttons must never ship. Re-add together with the real API. */}
     </div>
   );
 }
-

@@ -34,6 +34,10 @@ tenantsRouter.get('/me', requirePermission('tenant:read'), async (req, res, next
 tenantsRouter.patch('/me', requirePermission('tenant:write'), async (req, res, next) => {
   try {
     const parsed = updateTenantSettingsSchema.parse(req.body);
+    const user = await UserModel.findById(req.user!.id).select('emailVerified').lean();
+    if (!user?.emailVerified) {
+      throw AppError.forbidden('Please verify your email before changing shop settings');
+    }
     const updateDoc: Record<string, unknown> = {};
     if (parsed.name !== undefined) updateDoc.name = parsed.name;
     if (parsed.type !== undefined) updateDoc.type = parsed.type;

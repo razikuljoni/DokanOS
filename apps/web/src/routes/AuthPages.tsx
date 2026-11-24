@@ -658,7 +658,7 @@ export function AcceptInvitePage(): React.ReactElement {
     setServerError(null);
 
     if (!token) {
-      setClientError('Invitation token missing.');
+      setClientError('This link looks incomplete — copy the full link or request a new invite.');
       return;
     }
     if (password.length < 8) {
@@ -697,8 +697,7 @@ export function AcceptInvitePage(): React.ReactElement {
           <CardHeader>
             <CardTitle className="text-xl">Invalid Invitation</CardTitle>
             <CardDescription>
-              This staff invitation link is missing or invalid. Please ask your shop owner to
-              send a new invitation.
+              This link looks incomplete — copy the full link or request a new invite.
             </CardDescription>
           </CardHeader>
           <CardContent>
