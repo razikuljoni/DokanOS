@@ -688,23 +688,23 @@ export function ProductDetailPage(): React.ReactElement {
   });
 
   const adjustMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (vars: { qtyChange: number; note: string }) => {
       return apiFetch('/api/v1/stock/adjust', {
         method: 'POST',
         body: JSON.stringify({
           productId: id,
-          qtyChange: parsedQtyChange,
-          note,
+          qtyChange: vars.qtyChange,
+          note: vars.note,
         }),
       });
     },
-    onSuccess: () => {
+    onSuccess: (_, vars) => {
       void queryClient.invalidateQueries({ queryKey: ['products', tenant?.id, id] });
       void queryClient.invalidateQueries({ queryKey: ['products', tenant?.id] });
       void queryClient.invalidateQueries({ queryKey: ['dashboard', tenant?.id] });
       addToast({
         title: 'Stock Adjusted',
-        description: `Recorded ${parsedQtyChange > 0 ? `+${parsedQtyChange}` : parsedQtyChange} movement.`,
+        description: `Recorded ${vars.qtyChange > 0 ? `+${vars.qtyChange}` : vars.qtyChange} movement.`,
         variant: 'success',
       });
     },
@@ -839,7 +839,7 @@ export function ProductDetailPage(): React.ReactElement {
                   size="sm"
                   className="w-full"
                   disabled={adjustMutation.isPending || !isValidQtyChange || note.trim().length < 3}
-                  onClick={() => adjustMutation.mutate()}
+                  onClick={() => adjustMutation.mutate({ qtyChange: parsedQtyChange, note })}
                 >
                   {adjustMutation.isPending ? 'Recording...' : 'Record Stock Adjustment'}
                 </Button>

@@ -56,7 +56,7 @@ async function startDevBridge(): Promise<void> {
 
       if (
         req.path === '/' ||
-        /^\/(?:app(?:\/|$)|login|register|forgot-password|reset-password|accept-invite)(?:\/|$)/.test(
+        /^\/(?:app(?:\/|$)|login|register|forgot-password|reset-password|accept-invite|about|help|privacy|terms)(?:\/|$)/.test(
           req.path,
         )
       ) {
