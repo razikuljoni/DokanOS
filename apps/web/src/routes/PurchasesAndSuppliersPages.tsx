@@ -47,15 +47,17 @@ export function PurchasesPage(): React.ReactElement {
   const [modalOpen, setModalOpen] = useState(false);
   const [supplierId, setSupplierId] = useState('');
   const [productId, setProductId] = useState('');
-  const [qty, setQty] = useState(20);
-  const [costPrice, setCostPrice] = useState(120);
-  const [paidAmount, setPaidAmount] = useState(1000);
+  const [qty, setQty] = useState(10);
+  const [costPrice, setCostPrice] = useState(0);
+  const [costTouched, setCostTouched] = useState(false);
+  const [paidAmount, setPaidAmount] = useState(0);
 
   useEffect(() => {
     const paramProd = searchParams.get('productId');
     const paramQty = searchParams.get('qty');
     if (paramProd) {
       setProductId(paramProd);
+      setCostTouched(false);
       if (paramQty && Number(paramQty) > 0) {
         setQty(Number(paramQty));
       }
@@ -88,6 +90,12 @@ export function PurchasesPage(): React.ReactElement {
     (product) => product._id === (productId || products[0]?._id),
   );
   const costPriceChanged = Boolean(selectedProduct && costPrice !== selectedProduct.costPrice);
+
+  useEffect(() => {
+    if (modalOpen && selectedProduct && !costTouched) {
+      setCostPrice(selectedProduct.costPrice);
+    }
+  }, [modalOpen, selectedProduct, costTouched]);
 
   const createPurchaseMutation = useMutation({
     mutationFn: async () => {
@@ -196,7 +204,18 @@ export function PurchasesPage(): React.ReactElement {
             Baki payables.
           </p>
         </div>
-        <Button size="sm" onClick={() => setModalOpen(true)}>
+        <Button
+          size="sm"
+          onClick={() => {
+            createPurchaseMutation.reset();
+            setCostTouched(false);
+            if (selectedProduct) {
+              setCostPrice(selectedProduct.costPrice);
+            }
+            setPaidAmount(0);
+            setModalOpen(true);
+          }}
+        >
           <Plus className="h-3.5 w-3.5" />
           Receive New Purchase
         </Button>
@@ -247,6 +266,7 @@ export function PurchasesPage(): React.ReactElement {
                   value={productId || products[0]?._id || ''}
                   onChange={(e) => {
                     setProductId(e.target.value);
+                    setCostTouched(false);
                     const found = products.find((p) => p._id === e.target.value);
                     if (found) setCostPrice(found.costPrice);
                   }}
@@ -278,7 +298,10 @@ export function PurchasesPage(): React.ReactElement {
                     type="number"
                     min={0}
                     value={costPrice}
-                    onChange={(e) => setCostPrice(Number(e.target.value))}
+                    onChange={(e) => {
+                      setCostTouched(true);
+                      setCostPrice(Number(e.target.value));
+                    }}
                   />
                 </div>
               </div>
@@ -310,6 +333,14 @@ export function PurchasesPage(): React.ReactElement {
               </div>
             </div>
 
+            {createPurchaseMutation.isError && (
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                {createPurchaseMutation.error instanceof Error
+                  ? createPurchaseMutation.error.message
+                  : 'Unable to record purchase'}
+              </div>
+            )}
+
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" size="sm" onClick={() => setModalOpen(false)}>
                 Cancel
@@ -325,18 +356,7 @@ export function PurchasesPage(): React.ReactElement {
                   (!supplierId && suppliers.length === 0) ||
                   (!productId && products.length === 0)
                 }
-                onClick={() => {
-                  if (
-                    costPriceChanged &&
-                    selectedProduct &&
-                    !window.confirm(
-                      `This will change the cost price from ${formatBDT(selectedProduct.costPrice)} to ${formatBDT(costPrice)}. Continue?`,
-                    )
-                  ) {
-                    return;
-                  }
-                  createPurchaseMutation.mutate();
-                }}
+                onClick={() => createPurchaseMutation.mutate()}
               >
                 {createPurchaseMutation.isPending ? 'Receiving...' : 'Receive & Update Stock'}
               </Button>

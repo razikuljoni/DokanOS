@@ -18,6 +18,7 @@ import {
   toObjectIdParam,
 } from '../../utils/pagination.js';
 import { invalidateTenantCache } from '../../config/redis.js';
+import { recordAuditLog } from '../../utils/audit.js';
 
 export type AgeingBucket = '0-7' | '8-30' | '30+';
 
@@ -238,6 +239,11 @@ duesRouter.post('/:refId/payments', requirePermission('dues:write'), async (req,
     }
 
     let createdPayment: Awaited<ReturnType<typeof DuePaymentModel.findOne>> = null;
+    let auditPayload: {
+      entity: string;
+      entityId: string;
+      changes: Record<string, unknown>;
+    } | null = null;
 
     await session.withTransaction(async () => {
       const sale = await SaleModel.findOne({
@@ -293,6 +299,18 @@ duesRouter.post('/:refId/payments', requirePermission('dues:write'), async (req,
           { session },
         );
         createdPayment = doc ?? null;
+        auditPayload = {
+          entity: 'Sale',
+          entityId: sale._id.toString(),
+          changes: {
+            partyType: 'customer',
+            payer: sale.customerName || 'Walk-in Customer',
+            invoice: sale.invoiceNo,
+            amount: applied,
+            method: parsed.method,
+            resultingBalance: sale.dueAmount,
+          },
+        };
         return;
       }
 
@@ -338,6 +356,18 @@ duesRouter.post('/:refId/payments', requirePermission('dues:write'), async (req,
           { session },
         );
         createdPayment = doc ?? null;
+        auditPayload = {
+          entity: 'Purchase',
+          entityId: purchase._id.toString(),
+          changes: {
+            partyType: 'supplier',
+            payer: supplier?.name ?? 'Supplier',
+            invoice: `PO-${purchase._id.toString().slice(-6).toUpperCase()}`,
+            amount: applied,
+            method: parsed.method,
+            resultingBalance: purchase.dueAmount,
+          },
+        };
         return;
       }
 
@@ -345,6 +375,18 @@ duesRouter.post('/:refId/payments', requirePermission('dues:write'), async (req,
     });
 
     await invalidateTenantCache(req.tenant!.id);
+
+    if (auditPayload) {
+      await recordAuditLog({
+        tenantId: req.tenant!.id,
+        userId: req.user!.id,
+        action: 'due.payment_recorded',
+        entity: (auditPayload as { entity: string }).entity,
+        entityId: (auditPayload as { entityId: string }).entityId,
+        changes: (auditPayload as { changes: Record<string, unknown> }).changes,
+      });
+    }
+
     res.status(201).json({ data: createdPayment });
   } catch (err) {
     next(err);

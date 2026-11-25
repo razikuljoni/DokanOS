@@ -103,4 +103,36 @@ test.describe('DokanOS Responsive Viewport Suite', () => {
       await page.screenshot({ path: `e2e/screenshots/products-${vp.name}.png`, fullPage: true });
     });
   }
+
+  test('1440→360 shrink without remount — Dashboard stays within 360px with zero horizontal overflow', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/login');
+    await page.getByRole('button', { name: /Try the demo shop/i }).click();
+    await expect(page).toHaveURL(/\/app\/dashboard/);
+    await expect(
+      page.getByRole('heading', { name: /Rahim Pharmacy Ledger Overview/i }),
+    ).toBeVisible();
+
+    // Shrink viewport from 1440px to 360px without reloading or remounting
+    await page.setViewportSize({ width: 360, height: 640 });
+    await page.waitForTimeout(150);
+
+    const overflow = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+  });
+
+  test('direct load/refresh of /app/* routes serves the SPA without Express Cannot GET', async ({
+    page,
+  }) => {
+    for (const route of ['/app/dashboard', '/app/products', '/app/billing', '/app/settings']) {
+      const response = await page.goto(route);
+      expect(response?.status()).toBe(200);
+      await expect(page.locator('body')).not.toContainText('Cannot GET');
+    }
+  });
 });

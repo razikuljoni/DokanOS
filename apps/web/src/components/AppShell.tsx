@@ -97,12 +97,12 @@ export function AppShell(): React.ReactElement {
     return allowedRoles.includes(user.role);
   });
 
-  const handleLogout = async (): Promise<void> => {
-    try {
-      await apiFetch('/api/v1/auth/logout', { method: 'POST', skipAuthRefresh: true });
-    } catch {
-      // Ignore logout error
-    }
+  const handleLogout = (): void => {
+    void fetch('/api/v1/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+      keepalive: true,
+    }).catch(() => {});
     clearAuth();
     void navigate('/login');
   };
@@ -153,12 +153,13 @@ export function AppShell(): React.ReactElement {
             onClick={() => setMobileOpen(false)}
           />
           <aside className="fixed inset-y-0 left-0 w-64 bg-[#1C1917] text-[#FAF7F2] border-r border-[#2E2A26] flex flex-col z-10 shadow-2xl">
-            <div className="h-16 px-4 border-b border-[#2E2A26] flex items-center justify-between gap-2">
+            <div className="min-h-16 py-2.5 px-4 border-b border-[#2E2A26] flex items-center justify-between gap-2">
               <div className="min-w-0">
                 <Link
                   to="/app/dashboard"
                   onClick={() => setMobileOpen(false)}
-                  className="font-display text-base font-bold tracking-tight text-white truncate block"
+                  title={tenant?.name ?? 'DokanOS'}
+                  className="font-display text-sm font-bold tracking-tight text-white break-words leading-tight block"
                 >
                   {tenant?.name ?? 'DokanOS'}
                 </Link>
@@ -236,12 +237,13 @@ export function AppShell(): React.ReactElement {
         )}
       >
         {/* Shop Switcher Header */}
-        <div className="h-16 px-4 border-b border-[#2E2A26] flex items-center justify-between gap-2">
+        <div className="min-h-16 py-2.5 px-4 border-b border-[#2E2A26] flex items-center justify-between gap-2">
           {!sidebarCollapsed && (
             <div className="min-w-0">
               <Link
                 to="/app/dashboard"
-                className="font-display text-base font-bold tracking-tight text-white truncate block"
+                title={tenant?.name ?? 'DokanOS'}
+                className="font-display text-sm font-bold tracking-tight text-white break-words leading-tight block"
               >
                 {tenant?.name ?? 'DokanOS'}
               </Link>
@@ -398,14 +400,14 @@ export function AppShell(): React.ReactElement {
               type="button"
               onClick={toggleDarkMode}
               title="Toggle theme"
-              className="p-2 rounded-md border border-border bg-card hover:bg-secondary text-foreground transition-colors cursor-pointer"
+              className="p-2 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 flex items-center justify-center rounded-md border border-border bg-card hover:bg-secondary text-foreground transition-colors cursor-pointer"
             >
               {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
 
             <Link
               to="/app/alerts"
-              className="relative p-2 rounded-md border border-border bg-card hover:bg-secondary text-foreground transition-colors"
+              className="relative p-2 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 flex items-center justify-center rounded-md border border-border bg-card hover:bg-secondary text-foreground transition-colors"
               title="Notifications & Low-Stock Alerts"
             >
               <Bell className="h-4 w-4" />
@@ -432,18 +434,15 @@ export function AppShell(): React.ReactElement {
         <OfflineBannerAndDrawer />
 
         {/* Page Viewport with 150ms Framer Motion transition */}
-        <main className="flex-1 p-6 max-w-[1360px] w-full mx-auto">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={location.pathname}
-              initial={{ opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
-            >
-              <Outlet />
-            </motion.div>
-          </AnimatePresence>
+        <main className="flex-1 p-4 sm:p-6 max-w-[1360px] w-full mx-auto">
+          <motion.div
+            key={location.pathname}
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <Outlet />
+          </motion.div>
         </main>
       </div>
 

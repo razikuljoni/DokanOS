@@ -69,6 +69,7 @@ interface DashboardSummary {
     customerName: string;
     paymentMethod: string;
     paymentStatus: string;
+    isReturned?: boolean;
     total: number;
     dueAmount: number;
     createdAt: string;
@@ -185,22 +186,25 @@ export function DashboardPage(): React.ReactElement {
     {
       key: 'payment',
       header: 'Method / Status',
-      render: (row) => (
-        <span className="text-xs text-muted-foreground">
-          {row.paymentMethod.toUpperCase()} ·{' '}
-          <span
-            className={
-              row.paymentStatus === 'paid'
-                ? 'text-primary font-medium'
-                : row.paymentStatus === 'partial'
-                  ? 'text-warning font-medium'
-                  : 'text-destructive font-medium'
-            }
-          >
-            {row.paymentStatus.toUpperCase()}
+      render: (row) =>
+        row.isReturned ? (
+          <span className="text-xs font-medium text-destructive">RETURNED</span>
+        ) : (
+          <span className="text-xs text-muted-foreground">
+            {row.paymentMethod.toUpperCase()} ·{' '}
+            <span
+              className={
+                row.paymentStatus === 'paid'
+                  ? 'text-primary font-medium'
+                  : row.paymentStatus === 'partial'
+                    ? 'text-warning font-medium'
+                    : 'text-destructive font-medium'
+              }
+            >
+              {row.paymentStatus.toUpperCase()}
+            </span>
           </span>
-        </span>
-      ),
+        ),
     },
     {
       key: 'date',
@@ -260,7 +264,7 @@ export function DashboardPage(): React.ReactElement {
       {summary && <LowStockBanner count={summary.lowStockCount} />}
 
       {/* KPI Summary Cards (including Today's Total Sales vs Yesterday's Total Sales) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         <StatCard
           label="Today's Total Sales"
           value={formatBDT(todaySales)}
@@ -368,13 +372,13 @@ export function DashboardPage(): React.ReactElement {
 
       {/* Charts Row: Daily Revenue Line Chart + Category Breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className="lg:col-span-8">
+        <div className="lg:col-span-8 min-w-0">
           <ChartCard
             title="Daily Revenue Trend (BDT)"
             description="30-day counter sales aggregated by Asia/Dhaka date"
             loading={trendLoading}
           >
-            <div className="h-64 w-full">
+            <div className="h-64 w-full min-w-0 overflow-hidden">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={trend}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E7E0D4" />
@@ -403,14 +407,14 @@ export function DashboardPage(): React.ReactElement {
           </ChartCard>
         </div>
 
-        <div className="lg:col-span-4">
+        <div className="lg:col-span-4 min-w-0">
           <ChartCard
             title="Sales by Category"
             description="Revenue distribution by product department"
             loading={summaryLoading}
           >
-            <div className="h-64 w-full flex flex-col justify-between">
-              <div className="h-44 w-full">
+            <div className="h-64 w-full min-w-0 flex flex-col justify-between">
+              <div className="h-44 w-full min-w-0 overflow-hidden">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
@@ -453,13 +457,13 @@ export function DashboardPage(): React.ReactElement {
 
       {/* Bottom Row: Top 5 Products BarChart + Recent Sales Table */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className="lg:col-span-5">
+        <div className="lg:col-span-5 min-w-0">
           <ChartCard
             title="Top 5 Products by Revenue"
             description="Highest-grossing SKUs in the current period"
             loading={summaryLoading}
           >
-            <div className="h-64 w-full">
+            <div className="h-64 w-full min-w-0 overflow-hidden">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
                   data={summary?.topProducts ?? []}
@@ -488,7 +492,7 @@ export function DashboardPage(): React.ReactElement {
           </ChartCard>
         </div>
 
-        <div className="lg:col-span-7 space-y-3">
+        <div className="lg:col-span-7 min-w-0 space-y-3">
           <div className="flex items-center justify-between">
             <div>
               <h2 className="font-display text-base font-semibold">Recent POS Invoices</h2>

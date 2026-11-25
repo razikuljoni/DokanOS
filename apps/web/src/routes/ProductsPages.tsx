@@ -672,8 +672,14 @@ export function ProductDetailPage(): React.ReactElement {
   const queryClient = useQueryClient();
 
   const canAdjust = user?.role === 'owner' || user?.role === 'manager';
-  const [qtyChange, setQtyChange] = useState<number>(5);
+  const [qtyChangeInput, setQtyChangeInput] = useState<string>('5');
   const [note, setNote] = useState('Physical shelf count adjustment');
+  const parsedQtyChange = Number(qtyChangeInput);
+  const isValidQtyChange =
+    qtyChangeInput.trim() !== '' &&
+    qtyChangeInput.trim() !== '-' &&
+    Number.isInteger(parsedQtyChange) &&
+    parsedQtyChange !== 0;
 
   const { data, isLoading } = useQuery({
     queryKey: ['products', tenant?.id, id],
@@ -682,23 +688,23 @@ export function ProductDetailPage(): React.ReactElement {
   });
 
   const adjustMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (vars: { qtyChange: number; note: string }) => {
       return apiFetch('/api/v1/stock/adjust', {
         method: 'POST',
         body: JSON.stringify({
           productId: id,
-          qtyChange,
-          note,
+          qtyChange: vars.qtyChange,
+          note: vars.note,
         }),
       });
     },
-    onSuccess: () => {
+    onSuccess: (_, vars) => {
       void queryClient.invalidateQueries({ queryKey: ['products', tenant?.id, id] });
       void queryClient.invalidateQueries({ queryKey: ['products', tenant?.id] });
       void queryClient.invalidateQueries({ queryKey: ['dashboard', tenant?.id] });
       addToast({
         title: 'Stock Adjusted',
-        description: `Recorded ${qtyChange > 0 ? `+${qtyChange}` : qtyChange} movement.`,
+        description: `Recorded ${vars.qtyChange > 0 ? `+${vars.qtyChange}` : vars.qtyChange} movement.`,
         variant: 'success',
       });
     },
@@ -756,7 +762,7 @@ export function ProductDetailPage(): React.ReactElement {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="rounded-md border border-border overflow-hidden">
+              <div className="rounded-md border border-border overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="bg-secondary/60 border-b border-border text-muted-foreground">
@@ -810,9 +816,16 @@ export function ProductDetailPage(): React.ReactElement {
                   </Label>
                   <Input
                     id="adj-qty"
-                    type="number"
-                    value={qtyChange}
-                    onChange={(e) => setQtyChange(Number(e.target.value))}
+                    type="text"
+                    inputMode="numeric"
+                    value={qtyChangeInput}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/\s+/g, '');
+                      if (/^-?\d*$/.test(raw)) {
+                        setQtyChangeInput(raw);
+                      }
+                    }}
+                    placeholder="e.g. -3 or 10"
                     className="font-mono tabular-nums"
                   />
                 </div>
@@ -825,8 +838,8 @@ export function ProductDetailPage(): React.ReactElement {
                 <Button
                   size="sm"
                   className="w-full"
-                  disabled={adjustMutation.isPending || qtyChange === 0 || note.trim().length < 3}
-                  onClick={() => adjustMutation.mutate()}
+                  disabled={adjustMutation.isPending || !isValidQtyChange || note.trim().length < 3}
+                  onClick={() => adjustMutation.mutate({ qtyChange: parsedQtyChange, note })}
                 >
                   {adjustMutation.isPending ? 'Recording...' : 'Record Stock Adjustment'}
                 </Button>

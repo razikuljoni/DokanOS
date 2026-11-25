@@ -273,7 +273,7 @@ export function StaffPage(): React.ReactElement {
             <CardHeader>
               <CardTitle>Invite Staff or Manager</CardTitle>
               <CardDescription>
-                Generates a one-time setup link (default demo password: <code>Staff1234!</code>).
+                Generates a one-time setup link so the staff member can set their own password.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -659,6 +659,7 @@ export function SettingsPage(): React.ReactElement {
       });
     },
     onSuccess: (res) => {
+      queryClient.setQueryData(['tenant-me', tenant?.id, user?.role], { data: res.data });
       updateTenant({
         name: res.data.name,
         type: res.data.type,
@@ -671,6 +672,29 @@ export function SettingsPage(): React.ReactElement {
     onError: (err) => {
       addToast({
         title: 'Could Not Save Settings',
+        description: formatErrorMessage(err),
+        variant: 'danger',
+      });
+    },
+  });
+
+  const resendVerificationMutation = useMutation({
+    mutationFn: async () => {
+      return apiFetch<{ message?: string }>('/api/v1/auth/resend-verification', {
+        method: 'POST',
+        body: JSON.stringify({ email: user?.email }),
+      });
+    },
+    onSuccess: () => {
+      addToast({
+        title: 'Verification Email Sent',
+        description: 'Check your inbox for the verification link.',
+        variant: 'success',
+      });
+    },
+    onError: (err) => {
+      addToast({
+        title: 'Could Not Send Verification Email',
         description: formatErrorMessage(err),
         variant: 'danger',
       });
@@ -1001,6 +1025,31 @@ export function SettingsPage(): React.ReactElement {
         </CardHeader>
 
         <CardContent className="pt-6 space-y-6">
+          {canWriteTenant && user && !user.emailVerified && (
+            <div className="rounded-lg border border-warning/40 bg-warning/10 p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-warning">
+              <span>
+                Email verification is required before saving shop settings. Please verify{' '}
+                <strong className="font-mono">{user.email}</strong>.
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={resendVerificationMutation.isPending}
+                onClick={() => resendVerificationMutation.mutate()}
+              >
+                {resendVerificationMutation.isPending ? 'Sending...' : 'Resend Verification'}
+              </Button>
+            </div>
+          )}
+
+          {saveSettingsMutation.isError && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+              <strong>Could Not Save Settings:</strong>{' '}
+              {formatErrorMessage(saveSettingsMutation.error)}
+            </div>
+          )}
+
           {isTenantLoading ? (
             <div className="text-xs text-muted-foreground py-4">
               Loading live shop profile from <code>GET /api/v1/tenants/me</code>...

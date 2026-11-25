@@ -51,7 +51,7 @@ export function DataTable<T>({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 min-w-0 w-full">
       <div className="rounded-md border border-border bg-card overflow-x-auto">
         <table className="w-full text-sm border-collapse">
           <thead>

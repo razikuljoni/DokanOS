@@ -49,23 +49,13 @@ async function startDevBridge(): Promise<void> {
       }),
     );
     app.get('*all', (req, res, next) => {
-      if (req.path.startsWith('/assets/')) {
+      if (req.path.startsWith('/api/') || req.path === '/api' || req.path.startsWith('/assets/')) {
         next();
         return;
       }
 
-      if (
-        req.path === '/' ||
-        /^\/(?:app(?:\/|$)|login|register|forgot-password|reset-password|accept-invite)(?:\/|$)/.test(
-          req.path,
-        )
-      ) {
-        res.setHeader('Cache-Control', 'no-cache');
-        res.sendFile(path.join(distPath, 'index.html'));
-        return;
-      }
-
-      next();
+      res.setHeader('Cache-Control', 'no-cache');
+      res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 

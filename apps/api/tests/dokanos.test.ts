@@ -2270,4 +2270,242 @@ it("30. Partial returns accumulate, restock returned quantities, and mark fully 
     });
     expect(notifsAfterSecond.length).toBe(1); // Still exactly 1, no duplicate spam!
   });
+
+  // 39. Phase 0 — Receive purchase end-to-end (record, stock, cost, payable, ledger, audit)
+  it('39. Phase 0 Purchase Receive: creates purchase, increments stock, updates cost, records payable and ledger/audit', async () => {
+    const shop = await registerShop({
+      shopName: 'Phase0 Purchase Shop',
+      email: 'phase0-purchase@dokanos.bd',
+    });
+
+    const supplier = await SupplierModel.create({
+      tenantId: shop.tenantId,
+      name: 'Square Pharma Dist',
+      phone: '01711223344',
+      address: 'Dhaka',
+      totalDue: 0,
+    });
+
+    const prod = await ProductModel.create({
+      tenantId: shop.tenantId,
+      name: 'Seclo 20mg',
+      category: 'Medicine',
+      unit: 'box',
+      costPrice: 50,
+      sellPrice: 70,
+      stock: 5,
+      sku: 'SECLO-20',
+    });
+
+    const purchaseRes = await request(app)
+      .post('/api/v1/purchases')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({
+        supplierId: supplier._id.toString(),
+        items: [{ productId: prod._id.toString(), qty: 10, costPrice: 60 }],
+        paidAmount: 200,
+      });
+
+    expect(purchaseRes.status).toBe(201);
+    expect(purchaseRes.body.data.total).toBe(600);
+    expect(purchaseRes.body.data.paidAmount).toBe(200);
+    expect(purchaseRes.body.data.dueAmount).toBe(400);
+    expect(purchaseRes.body.data.status).toBe('partial');
+
+    const listRes = await request(app)
+      .get('/api/v1/purchases')
+      .set('Authorization', `Bearer ${shop.accessToken}`);
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.data.length).toBe(1);
+
+    const updatedProd = await ProductModel.findById(prod._id);
+    expect(updatedProd?.stock).toBe(15);
+    expect(updatedProd?.costPrice).toBe(60);
+
+    const updatedSupplier = await SupplierModel.findById(supplier._id);
+    expect(updatedSupplier?.totalDue).toBe(400);
+
+    const movement = await StockMovementModel.findOne({
+      tenantId: shop.tenantId,
+      productId: prod._id,
+      type: 'purchase',
+    });
+    expect(movement).not.toBeNull();
+    expect(movement?.qtyChange).toBe(10);
+    expect(movement?.balanceAfter).toBe(15);
+
+    const auditLogs = await AuditLogModel.find({ tenantId: shop.tenantId }).lean();
+    const actions = auditLogs.map((a) => a.action);
+    expect(actions).toContain('purchase.created');
+    expect(actions).toContain('product.cost_changed');
+  });
+
+  // 40. Phase 1 — Settings save persists name, type, and lowStockThreshold across reloads
+  it('40. Phase 1 Settings Save: PATCH /api/v1/tenants/me persists shop name and lowStockThreshold in GET /tenants/me and /auth/me', async () => {
+    const shop = await registerShop({
+      shopName: 'Original Settings Shop',
+      email: 'phase1-settings@dokanos.bd',
+    });
+    await UserModel.updateOne({ _id: shop.userId }, { $set: { emailVerified: true } });
+
+    const patchRes = await request(app)
+      .patch('/api/v1/tenants/me')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({
+        name: 'Renamed Settings Shop',
+        type: 'grocery',
+        lowStockThreshold: 25,
+      });
+
+    expect(patchRes.status).toBe(200);
+    expect(patchRes.body.data.name).toBe('Renamed Settings Shop');
+    expect(patchRes.body.data.type).toBe('grocery');
+    expect(patchRes.body.data.settings.lowStockThreshold).toBe(25);
+
+    const getTenantRes = await request(app)
+      .get('/api/v1/tenants/me')
+      .set('Authorization', `Bearer ${shop.accessToken}`);
+    expect(getTenantRes.status).toBe(200);
+    expect(getTenantRes.body.data.name).toBe('Renamed Settings Shop');
+    expect(getTenantRes.body.data.settings.lowStockThreshold).toBe(25);
+
+    const meRes = await request(app)
+      .get('/api/v1/auth/me')
+      .set('Authorization', `Bearer ${shop.accessToken}`);
+    expect(meRes.status).toBe(200);
+    expect(meRes.body.tenant.name).toBe('Renamed Settings Shop');
+    expect(meRes.body.tenant.settings.lowStockThreshold).toBe(25);
+  });
+
+  // 41. Phase 2 — Cancelled checkouts update payment status to cancelled and SSLCommerz cancel redirects cleanly
+  it('41. Phase 2 Cancelled Payments: Stripe/SSLCommerz cancel marks pending payment cancelled and redirects browser form POST', async () => {
+    const shop = await registerShop({
+      shopName: 'Phase2 Cancel Shop',
+      email: 'phase2-cancel@dokanos.bd',
+    });
+
+    const stripeInit = await request(app)
+      .post('/api/v1/billing/stripe/checkout')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({ period: 'monthly' });
+    expect(stripeInit.status).toBe(201);
+    const stripeTranId = stripeInit.body.data.tranId as string;
+
+    const cancelStripeRes = await request(app)
+      .post(`/api/v1/billing/payments/${encodeURIComponent(stripeTranId)}/cancel`)
+      .set('Authorization', `Bearer ${shop.accessToken}`);
+    expect(cancelStripeRes.status).toBe(200);
+    expect(cancelStripeRes.body.data.status).toBe('cancelled');
+    expect((await PaymentModel.findOne({ eventId: stripeTranId }))?.status).toBe('cancelled');
+
+    const sslInit = await request(app)
+      .post('/api/v1/billing/sslcommerz/init')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({ period: 'monthly' });
+    expect(sslInit.status).toBe(201);
+    const sslTranId = sslInit.body.data.tranId as string;
+
+    // Simulate SSLCommerz browser form POST redirect on cancel
+    const sslCancelFormRes = await request(app)
+      .post('/api/v1/billing/sslcommerz/cancel')
+      .type('form')
+      .set('Accept', 'text/html')
+      .send({
+        tran_id: sslTranId,
+        status: 'CANCELLED',
+        store_id: process.env.SSLCZ_STORE_ID || 'testbox',
+      });
+    expect(sslCancelFormRes.status).toBe(303);
+    expect(sslCancelFormRes.headers.location).toContain('/app/billing?status=cancelled');
+    expect((await PaymentModel.findOne({ eventId: sslTranId }))?.status).toBe('cancelled');
+  });
+
+  // 42. Phase 3 — Negative stock adjustment deducts stock and records signed ledger movement
+  it('42. Phase 3 Negative Stock Adjustment: adjusting -3 decreases stock by 3 and writes -3 movement', async () => {
+    const shop = await registerShop({
+      shopName: 'Phase3 Stock Shop',
+      email: 'phase3-stock@dokanos.bd',
+    });
+
+    const prod = await ProductModel.create({
+      tenantId: shop.tenantId,
+      name: 'Sergel 20mg',
+      category: 'Medicine',
+      unit: 'pcs',
+      costPrice: 5,
+      sellPrice: 7,
+      stock: 10,
+      sku: 'SERGEL-20',
+    });
+
+    const adjustRes = await request(app)
+      .post('/api/v1/stock/adjust')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({
+        productId: prod._id.toString(),
+        qtyChange: -3,
+        note: 'Damaged blister pack',
+      });
+
+    expect(adjustRes.status).toBe(200);
+    const updatedProd = await ProductModel.findById(prod._id);
+    expect(updatedProd?.stock).toBe(7);
+
+    const movement = await StockMovementModel.findOne({
+      tenantId: shop.tenantId,
+      productId: prod._id,
+      type: 'adjustment',
+    });
+    expect(movement).not.toBeNull();
+    expect(movement?.qtyChange).toBe(-3);
+    expect(movement?.balanceAfter).toBe(7);
+  });
+
+  // 43. Phase 4 — Dues payments are written to Tenant Audit Log
+  it('43. Phase 4 Dues Audit Log: recording a due payment writes due.payment_recorded to AuditLogModel', async () => {
+    const shop = await registerShop({
+      shopName: 'Phase4 Dues Audit Shop',
+      email: 'phase4-dues@dokanos.bd',
+    });
+
+    const prod = await ProductModel.create({
+      tenantId: shop.tenantId,
+      name: 'Ace Plus',
+      category: 'Medicine',
+      unit: 'pcs',
+      costPrice: 20,
+      sellPrice: 30,
+      stock: 10,
+      sku: 'ACE-PLUS',
+    });
+
+    const saleRes = await request(app)
+      .post('/api/v1/sales')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({
+        items: [{ productId: prod._id.toString(), qty: 2 }],
+        paymentMethod: 'cash',
+        paidAmount: 0,
+        customerName: 'Karim Mia',
+        customerPhone: '01799887766',
+      });
+    expect(saleRes.status).toBe(201);
+    const saleId = saleRes.body.data._id as string;
+
+    const payRes = await request(app)
+      .post(`/api/v1/dues/${saleId}/payments`)
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({ amount: 40, method: 'cash' });
+    expect(payRes.status).toBe(201);
+
+    const audit = await AuditLogModel.findOne({
+      tenantId: shop.tenantId,
+      action: 'due.payment_recorded',
+      entityId: saleId,
+    }).lean();
+    expect(audit).not.toBeNull();
+    expect(audit?.changes.payer).toBe('Karim Mia');
+    expect(audit?.changes.amount).toBe(40);
+    expect(audit?.changes.resultingBalance).toBe(20);
+  });
 });
