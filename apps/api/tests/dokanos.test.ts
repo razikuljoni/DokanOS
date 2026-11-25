@@ -2376,4 +2376,47 @@ it("30. Partial returns accumulate, restock returned quantities, and mark fully 
     expect(meRes.body.tenant.name).toBe('Renamed Settings Shop');
     expect(meRes.body.tenant.settings.lowStockThreshold).toBe(25);
   });
+
+  // 41. Phase 2 — Cancelled checkouts update payment status to cancelled and SSLCommerz cancel redirects cleanly
+  it('41. Phase 2 Cancelled Payments: Stripe/SSLCommerz cancel marks pending payment cancelled and redirects browser form POST', async () => {
+    const shop = await registerShop({
+      shopName: 'Phase2 Cancel Shop',
+      email: 'phase2-cancel@dokanos.bd',
+    });
+
+    const stripeInit = await request(app)
+      .post('/api/v1/billing/stripe/checkout')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({ period: 'monthly' });
+    expect(stripeInit.status).toBe(201);
+    const stripeTranId = stripeInit.body.data.tranId as string;
+
+    const cancelStripeRes = await request(app)
+      .post(`/api/v1/billing/payments/${encodeURIComponent(stripeTranId)}/cancel`)
+      .set('Authorization', `Bearer ${shop.accessToken}`);
+    expect(cancelStripeRes.status).toBe(200);
+    expect(cancelStripeRes.body.data.status).toBe('cancelled');
+    expect((await PaymentModel.findOne({ eventId: stripeTranId }))?.status).toBe('cancelled');
+
+    const sslInit = await request(app)
+      .post('/api/v1/billing/sslcommerz/init')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({ period: 'monthly' });
+    expect(sslInit.status).toBe(201);
+    const sslTranId = sslInit.body.data.tranId as string;
+
+    // Simulate SSLCommerz browser form POST redirect on cancel
+    const sslCancelFormRes = await request(app)
+      .post('/api/v1/billing/sslcommerz/cancel')
+      .type('form')
+      .set('Accept', 'text/html')
+      .send({
+        tran_id: sslTranId,
+        status: 'CANCELLED',
+        store_id: process.env.SSLCZ_STORE_ID || 'testbox',
+      });
+    expect(sslCancelFormRes.status).toBe(303);
+    expect(sslCancelFormRes.headers.location).toContain('/app/billing?status=cancelled');
+    expect((await PaymentModel.findOne({ eventId: sslTranId }))?.status).toBe('cancelled');
+  });
 });

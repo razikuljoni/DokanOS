@@ -1,6 +1,8 @@
 import { Router, type Request } from 'express';
+import crypto from 'node:crypto';
 import mongoose, { Types } from 'mongoose';
 import axios from 'axios';
+import jwt from 'jsonwebtoken';
 import Stripe from 'stripe';
 import rateLimit from 'express-rate-limit';
 import {
@@ -854,43 +856,138 @@ async function handleSslCommerzSuccess(
   }
 }
 
+function verifySslCommerzSignature(body: Record<string, unknown>): boolean {
+  const verifySign = typeof body.verify_sign === 'string' ? body.verify_sign : '';
+  const verifyKey = typeof body.verify_key === 'string' ? body.verify_key : '';
+  if (!verifySign || !verifyKey || !env.SSLCZ_STORE_PASSWD) {
+    return false;
+  }
+  const keys = verifyKey
+    .split(',')
+    .map((k) => k.trim())
+    .filter(Boolean);
+  const storePasswdMd5 = crypto
+    .createHash('md5')
+    .update(env.SSLCZ_STORE_PASSWD)
+    .digest('hex');
+
+  const pairs: Record<string, string> = { store_passwd: storePasswdMd5 };
+  for (const key of keys) {
+    if (key === 'store_passwd') continue;
+    pairs[key] = body[key] === undefined || body[key] === null ? '' : String(body[key]);
+  }
+  const sortedString = Object.keys(pairs)
+    .sort()
+    .map((k) => `${k}=${pairs[k]}`)
+    .join('&');
+  const computed = crypto.createHash('md5').update(sortedString).digest('hex');
+  return computed === verifySign;
+}
+
+function hasSslCommerzCallbackProof(
+  req: Request,
+  paymentTenantId: string,
+): boolean {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    try {
+      const decoded = jwt.verify(authHeader.slice(7), env.JWT_ACCESS_SECRET) as {
+        tenantId?: string | null;
+      };
+      return decoded.tenantId === paymentTenantId;
+    } catch {
+      return false;
+    }
+  }
+
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  if (verifySslCommerzSignature(body)) {
+    return true;
+  }
+
+  const storeId = typeof body.store_id === 'string' ? body.store_id : '';
+  const status = typeof body.status === 'string' ? body.status.toUpperCase() : '';
+  if (
+    storeId &&
+    env.SSLCZ_STORE_ID &&
+    storeId === env.SSLCZ_STORE_ID &&
+    (status === 'CANCELLED' || status === 'FAILED' || Boolean(body.val_id))
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function wantsJsonResponse(req: Request): boolean {
+  return Boolean(
+    req.is('json') || req.headers.accept?.includes('application/json') || req.query.format === 'json',
+  );
+}
+
+async function handleSslCommerzOutcome(
+  req: Request,
+  res: import('express').Response,
+  next: import('express').NextFunction,
+  outcome: 'failed' | 'cancelled',
+): Promise<void> {
+  try {
+    const tranId = String((req.body as { tran_id?: string })?.tran_id ?? req.query.tran_id ?? '');
+    const isBrowserFormPost = req.method === 'POST' && !wantsJsonResponse(req);
+
+    if (!tranId) {
+      if (isBrowserFormPost || (req.method === 'GET' && !wantsJsonResponse(req))) {
+        res.redirect(303, `${frontendBaseUrl()}/app/billing?status=${outcome}`);
+        return;
+      }
+      throw AppError.badRequest('Missing tran_id parameter');
+    }
+
+    const payment = await PaymentModel.findOne({ provider: 'sslcommerz', eventId: tranId }).lean();
+    if (!payment) {
+      if (isBrowserFormPost || (req.method === 'GET' && !wantsJsonResponse(req))) {
+        res.redirect(
+          303,
+          `${frontendBaseUrl()}/app/billing?status=${outcome}&tran_id=${encodeURIComponent(tranId)}`,
+        );
+        return;
+      }
+      throw AppError.notFound(`Payment transaction '${tranId}' not found`);
+    }
+
+    if (req.method === 'POST') {
+      const authorized = hasSslCommerzCallbackProof(req, payment.tenantId.toString());
+      if (!authorized && !isBrowserFormPost) {
+        throw AppError.unauthorized('Authenticated payment owner or gateway proof required');
+      }
+      if (authorized && payment.status === 'pending') {
+        await PaymentModel.updateOne(
+          { provider: 'sslcommerz', eventId: tranId, status: 'pending' },
+          { $set: { status: outcome, raw: req.body } },
+        );
+      }
+    }
+
+    if (isBrowserFormPost || (req.method === 'GET' && !wantsJsonResponse(req))) {
+      res.redirect(
+        303,
+        `${frontendBaseUrl()}/app/billing?status=${outcome}&tran_id=${encodeURIComponent(tranId)}`,
+      );
+      return;
+    }
+
+    res.status(200).json({ data: { status: outcome, tranId } });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function handleSslCommerzFail(
   req: Request,
   res: import('express').Response,
   next: import('express').NextFunction,
 ): Promise<void> {
-  try {
-    if (req.method === 'POST' && !req.headers.authorization) {
-      throw AppError.unauthorized('Authenticated payment owner or gateway proof required');
-    }
-    const tranId = String((req.body as { tran_id?: string })?.tran_id ?? req.query.tran_id ?? '');
-    if (!tranId) {
-      throw AppError.badRequest('Missing tran_id parameter');
-    }
-    const payment = await PaymentModel.findOne({ provider: 'sslcommerz', eventId: tranId }).lean();
-    if (!payment) {
-      throw AppError.notFound(`Payment transaction '${tranId}' not found`);
-    }
-
-    if (req.method === 'POST') {
-      if (payment.status === 'pending') {
-        await PaymentModel.updateOne(
-          { provider: 'sslcommerz', eventId: tranId, status: 'pending' },
-          { $set: { status: 'failed', raw: req.body } },
-        );
-      }
-    }
-
-    if (req.method === 'GET' && !req.headers.accept?.includes('application/json')) {
-      res.redirect(
-        `${frontendBaseUrl()}/app/billing?status=failed&tran_id=${encodeURIComponent(tranId)}`,
-      );
-      return;
-    }
-    res.status(200).json({ data: { status: 'failed', tranId } });
-  } catch (err) {
-    next(err);
-  }
+  return handleSslCommerzOutcome(req, res, next, 'failed');
 }
 
 async function handleSslCommerzCancel(
@@ -898,38 +995,7 @@ async function handleSslCommerzCancel(
   res: import('express').Response,
   next: import('express').NextFunction,
 ): Promise<void> {
-  try {
-    if (req.method === 'POST' && !req.headers.authorization) {
-      throw AppError.unauthorized('Authenticated payment owner or gateway proof required');
-    }
-    const tranId = String((req.body as { tran_id?: string })?.tran_id ?? req.query.tran_id ?? '');
-    if (!tranId) {
-      throw AppError.badRequest('Missing tran_id parameter');
-    }
-    const payment = await PaymentModel.findOne({ provider: 'sslcommerz', eventId: tranId }).lean();
-    if (!payment) {
-      throw AppError.notFound(`Payment transaction '${tranId}' not found`);
-    }
-
-    if (req.method === 'POST') {
-      if (payment.status === 'pending') {
-        await PaymentModel.updateOne(
-          { provider: 'sslcommerz', eventId: tranId, status: 'pending' },
-          { $set: { status: 'failed', raw: req.body } },
-        );
-      }
-    }
-
-    if (req.method === 'GET' && !req.headers.accept?.includes('application/json')) {
-      res.redirect(
-        `${frontendBaseUrl()}/app/billing?status=cancelled&tran_id=${encodeURIComponent(tranId)}`,
-      );
-      return;
-    }
-    res.status(200).json({ data: { status: 'cancelled', tranId } });
-  } catch (err) {
-    next(err);
-  }
+  return handleSslCommerzOutcome(req, res, next, 'cancelled');
 }
 
 // Rate limiting on public gateway callback routes outside test environment
@@ -1149,6 +1215,42 @@ billingRouter.post('/reconcile', requirePermission('billing:write'), async (_req
     next(err);
   }
 });
+
+// POST /api/v1/billing/payments/:tranId/cancel — mark an owner's pending checkout as cancelled
+billingRouter.post(
+  '/payments/:tranId/cancel',
+  requirePermission('billing:write'),
+  async (req, res, next) => {
+    try {
+      const tranId = String(req.params.tranId ?? '').trim();
+      if (!tranId) {
+        throw AppError.badRequest('Missing transaction ID');
+      }
+
+      const payment = await PaymentModel.findOne({
+        tenantId: new Types.ObjectId(req.tenant!.id),
+        eventId: tranId,
+      });
+
+      if (!payment) {
+        throw AppError.notFound(`Payment transaction '${tranId}' not found`);
+      }
+
+      if (payment.status === 'pending') {
+        payment.status = 'cancelled';
+        payment.raw = {
+          ...((payment.raw as Record<string, unknown>) || {}),
+          cancelledByUserAt: new Date().toISOString(),
+        };
+        await payment.save();
+      }
+
+      res.status(200).json({ data: { tranId, status: payment.status } });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 // POST /api/v1/billing/cancel
 billingRouter.post('/cancel', requirePermission('billing:write'), async (req, res, next) => {

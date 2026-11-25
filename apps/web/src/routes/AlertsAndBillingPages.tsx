@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -797,6 +797,31 @@ export function BillingPage(): React.ReactElement {
 
   const callbackStatus = searchParams.get('status');
   const callbackTranId = searchParams.get('tran_id');
+  const cancelledTranIdsRef = useRef<Set<string>>(new Set());
+
+  const cancelPaymentMutation = useMutation({
+    mutationFn: async (tranId: string) => {
+      return apiFetch<{ data: { tranId: string; status: string } }>(
+        `/api/v1/billing/payments/${encodeURIComponent(tranId)}/cancel`,
+        { method: 'POST' },
+      );
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['billing', tenant?.id] });
+    },
+  });
+
+  useEffect(() => {
+    if (
+      callbackStatus === 'cancelled' &&
+      callbackTranId &&
+      tenant?.id &&
+      !cancelledTranIdsRef.current.has(callbackTranId)
+    ) {
+      cancelledTranIdsRef.current.add(callbackTranId);
+      cancelPaymentMutation.mutate(callbackTranId);
+    }
+  }, [callbackStatus, callbackTranId, tenant?.id, cancelPaymentMutation]);
 
   const initSslCommerzMutation = useMutation({
     mutationFn: async (payload: {
@@ -1004,7 +1029,9 @@ export function BillingPage(): React.ReactElement {
               ? 'text-primary'
               : row.status === 'pending'
                 ? 'text-warning'
-                : 'text-destructive'
+                : row.status === 'cancelled'
+                  ? 'text-muted-foreground'
+                  : 'text-destructive'
           }`}
         >
           {row.status}
@@ -1056,7 +1083,9 @@ export function BillingPage(): React.ReactElement {
           <span>
             {callbackStatus === 'success'
               ? `Payment verified via SSLCommerz Sandbox (${callbackTranId ?? 'N/A'}) — DokanOS Pro is active for 30 days.`
-              : `Gateway checkout ${callbackStatus} (${callbackTranId ?? 'N/A'}). No charges were applied.`}
+              : callbackStatus === 'cancelled'
+                ? `Payment cancelled — no charge was made (${callbackTranId ?? 'N/A'}).`
+                : `Gateway checkout ${callbackStatus} (${callbackTranId ?? 'N/A'}). No charges were applied.`}
           </span>
           <button
             type="button"
@@ -1183,7 +1212,7 @@ export function BillingPage(): React.ReactElement {
               </CardTitle>
               <CardDescription>
                 Local Bangladeshi gateways use one-off payments — no auto-renewal. Every callback is
-                verified server-side and deduplicated on <code>{'{ provider, eventId }'}</code>.
+                verified server-side and deduplicated per transaction.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1538,7 +1567,14 @@ export function BillingPage(): React.ReactElement {
               </div>
 
               <div className="flex justify-end gap-2 pt-2">
-                <Button variant="outline" size="sm" onClick={() => setSandboxModal(null)}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    cancelPaymentMutation.mutate(sandboxModal.tranId);
+                    setSandboxModal(null);
+                  }}
+                >
                   Cancel
                 </Button>
                 <Button

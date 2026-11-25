@@ -494,7 +494,7 @@ export interface IPayment extends Document {
   eventId: string;
   amount: number;
   currency: string;
-  status: 'pending' | 'paid' | 'failed' | 'refunded';
+  status: 'pending' | 'paid' | 'failed' | 'cancelled' | 'refunded';
   purpose: 'subscription' | 'sale';
   raw: Record<string, unknown>;
   createdAt: Date;
@@ -511,7 +511,7 @@ const paymentSchema = new Schema<IPayment>(
     currency: { type: String, default: DEFAULT_CURRENCY },
     status: {
       type: String,
-      enum: ['pending', 'paid', 'failed', 'refunded'],
+      enum: ['pending', 'paid', 'failed', 'cancelled', 'refunded'],
       default: 'pending',
     },
     purpose: { type: String, enum: ['subscription', 'sale'], default: 'subscription' },
