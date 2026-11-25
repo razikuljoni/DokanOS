@@ -8,7 +8,29 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 - Future: Live bKash Tokenized Checkout activation once merchant portal credentials and IP whitelisting are provisioned.
-- Future: Printable thermal 58mm/80mm ESC/POS USB receipt layout preset.
+
+---
+
+## [1.2.0] - 2026-11-25
+
+### SPA Routing & Reliability
+- Served `index.html` for all non-`/api/*` GET routes (including `/app/*`, `/about`, `/help`, `/privacy`, `/terms`) in both `apps/api/src/app.ts` and `server.ts`, fixing production refresh `"Cannot GET"` errors.
+- Removed `AnimatePresence mode="wait"` around `<Outlet />` in `AppShell` to prevent spurious route remounts resetting form inputs.
+- Guarded `/sw.js` service worker registration to `import.meta.env.PROD` and disabled dev-mode SW to eliminate dev console MIME errors.
+- Made owner sign-out immediate via `keepalive: true` logout request and increased `apiFetch` timeout to 45s.
+
+### Purchases, Settings, Billing & Ledger Integrity
+- Removed blocking `window.confirm` on Purchase Receive, synced initial `costPrice` to the selected product, and moved `product.cost_changed` audit logging outside the MongoDB transaction.
+- Added inline email-verification and error banners plus synchronous query cache updates on Shop Settings save.
+- Added `'cancelled'` status to `PaymentModel`, implemented `POST /api/v1/billing/payments/:tranId/cancel`, and updated SSLCommerz `cancel`/`fail` handlers to verify gateway/owner proof and redirect browser form POSTs to `/app/billing` cleanly.
+- Removed `{ provider, eventId }` placeholder text on Billing, unified `Fill test details` + visible test credentials/OTP across SSLCommerz and Stripe, and clarified active staff usage labels.
+- Fixed negative stock adjustment input (`type="text" inputMode="numeric"`), moved thermal receipt printing to a hidden iframe (`printReceiptElement`), fixed `"RETURNEDRETURNED"` doubled status and Dashboard `RETURNED` badge, and logged `due.payment_recorded` in the Tenant Audit Log.
+- Removed `Staff1234!` default-password text and added real `/about`, `/help`, `/privacy`, and `/terms` pages linked from the landing footer.
+
+### Responsive Layout & E2E Audit
+- Added `min-w-0` and `overflow-hidden` to Dashboard chart/table grid containers (`ChartCard`, `Card`, `DataTable`, `DashboardPage`) so `1440px → 360px` viewport shrinks stay within `360px` without remounting.
+- Wrapped long sidebar shop names (`title` + `break-words`) instead of ellipsizing at `1024px`/`1440px`, and ensured `>= 44px` mobile header touch targets.
+- Added `e2e/audit.spec.ts` and expanded `e2e/viewports.spec.ts` for shrink-without-remount and direct `/app/*` route loads.
 
 ---
 
