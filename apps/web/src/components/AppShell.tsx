@@ -97,12 +97,12 @@ export function AppShell(): React.ReactElement {
     return allowedRoles.includes(user.role);
   });
 
-  const handleLogout = async (): Promise<void> => {
-    try {
-      await apiFetch('/api/v1/auth/logout', { method: 'POST', skipAuthRefresh: true });
-    } catch {
-      // Ignore logout error
-    }
+  const handleLogout = (): void => {
+    void fetch('/api/v1/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+      keepalive: true,
+    }).catch(() => {});
     clearAuth();
     void navigate('/login');
   };

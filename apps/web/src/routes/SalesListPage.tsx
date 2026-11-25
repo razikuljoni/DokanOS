@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CloudOff, Download, Eye, Plus, Printer, RotateCcw, Search, X } from 'lucide-react';
@@ -17,6 +17,7 @@ import {
   type ThermalPaperWidth,
 } from '@/components/SharedWidgets';
 import { downloadCsvFile, formatBDT, formatDateDhaka } from '@/lib/utils';
+import { printReceiptElement } from '@/lib/printReceipt';
 import type { PaginationMeta } from '@dokanos/shared';
 
 interface SaleRecord {
@@ -58,6 +59,7 @@ export function SalesListPage(): React.ReactElement {
   const [paperWidth, setPaperWidth] = useState<ThermalPaperWidth>('80mm');
   const [isExportingCsv, setIsExportingCsv] = useState(false);
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
+  const receiptPrintRef = useRef<HTMLDivElement | null>(null);
   const [returnConfirmation, setReturnConfirmation] = useState<Array<{
     productId: string;
     qty: number;
@@ -84,13 +86,27 @@ export function SalesListPage(): React.ReactElement {
     );
   }, [selectedSale]);
 
+  const handlePrintSelectedReceipt = (invoiceNo?: string): void => {
+    const result = printReceiptElement(
+      receiptPrintRef.current,
+      invoiceNo ? `Receipt ${invoiceNo}` : 'DokanOS Thermal Receipt',
+    );
+    if (!result.ok) {
+      addToast({
+        title: 'Print Unavailable',
+        description: result.reason,
+        variant: 'warning',
+      });
+    }
+  };
+
   const handleQuickPrint = (sale: SaleRecord): void => {
     setSelectedSale(sale);
     setViewMode('thermal');
     setReturnMode(false);
     window.setTimeout(() => {
-      window.print();
-    }, 60);
+      handlePrintSelectedReceipt(sale.invoiceNo);
+    }, 80);
   };
 
   const handleDownloadSalesCsv = async (): Promise<void> => {
@@ -580,8 +596,9 @@ export function SalesListPage(): React.ReactElement {
                   </div>
                 </div>
 
-                {/* Thermal Receipt View (Always mounted in DOM so @media print captures it) */}
+                {/* Thermal Receipt View (Captured by hidden-iframe print helper) */}
                 <div
+                  ref={receiptPrintRef}
                   className={
                     viewMode === 'thermal'
                       ? 'py-3 px-2 rounded-md border border-border bg-secondary/40'
@@ -722,7 +739,11 @@ export function SalesListPage(): React.ReactElement {
                 )}
 
                 <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" onClick={() => window.print()}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handlePrintSelectedReceipt(selectedSale.invoiceNo)}
+                  >
                     <Printer className="h-3.5 w-3.5" />
                     Print Thermal Receipt
                   </Button>

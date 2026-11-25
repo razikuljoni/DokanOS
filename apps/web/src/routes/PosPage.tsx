@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'motion/react';
 import {
@@ -31,6 +31,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { ThermalReceipt, type ThermalPaperWidth } from '@/components/SharedWidgets';
+import { printReceiptElement } from '@/lib/printReceipt';
 import { formatBDT } from '@/lib/utils';
 
 type ProductItem = CachedProductItem;
@@ -50,6 +51,7 @@ export function PosPage(): React.ReactElement {
   const setDrawerOpen = useOfflineStore((s) => s.setDrawerOpen);
   const outboxCount = useOfflineStore((s) => s.outboxItems.length);
   const queryClient = useQueryClient();
+  const receiptPrintRef = useRef<HTMLDivElement | null>(null);
 
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
@@ -727,7 +729,10 @@ export function PosPage(): React.ReactElement {
               </div>
             )}
 
-            <div className="overflow-y-auto py-2 px-1 bg-secondary/40 rounded border border-border/70 flex-1">
+            <div
+              ref={receiptPrintRef}
+              className="overflow-y-auto py-2 px-1 bg-secondary/40 rounded border border-border/70 flex-1"
+            >
               <ThermalReceipt
                 sale={lastReceipt}
                 shopName={tenant?.name}
@@ -743,7 +748,23 @@ export function PosPage(): React.ReactElement {
                 Format: {paperWidth} POS Roll
               </span>
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => window.print()}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const result = printReceiptElement(
+                      receiptPrintRef.current,
+                      `Receipt ${lastReceipt.invoiceNo}`,
+                    );
+                    if (!result.ok) {
+                      addToast({
+                        title: 'Print Unavailable',
+                        description: result.reason,
+                        variant: 'warning',
+                      });
+                    }
+                  }}
+                >
                   <Printer className="h-3.5 w-3.5" />
                   Print Thermal Receipt
                 </Button>

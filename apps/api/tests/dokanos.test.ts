@@ -2419,4 +2419,45 @@ it("30. Partial returns accumulate, restock returned quantities, and mark fully 
     expect(sslCancelFormRes.headers.location).toContain('/app/billing?status=cancelled');
     expect((await PaymentModel.findOne({ eventId: sslTranId }))?.status).toBe('cancelled');
   });
+
+  // 42. Phase 3 — Negative stock adjustment deducts stock and records signed ledger movement
+  it('42. Phase 3 Negative Stock Adjustment: adjusting -3 decreases stock by 3 and writes -3 movement', async () => {
+    const shop = await registerShop({
+      shopName: 'Phase3 Stock Shop',
+      email: 'phase3-stock@dokanos.bd',
+    });
+
+    const prod = await ProductModel.create({
+      tenantId: shop.tenantId,
+      name: 'Sergel 20mg',
+      category: 'Medicine',
+      unit: 'pcs',
+      costPrice: 5,
+      sellPrice: 7,
+      stock: 10,
+      sku: 'SERGEL-20',
+    });
+
+    const adjustRes = await request(app)
+      .post('/api/v1/stock/adjust')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({
+        productId: prod._id.toString(),
+        qtyChange: -3,
+        note: 'Damaged blister pack',
+      });
+
+    expect(adjustRes.status).toBe(200);
+    const updatedProd = await ProductModel.findById(prod._id);
+    expect(updatedProd?.stock).toBe(7);
+
+    const movement = await StockMovementModel.findOne({
+      tenantId: shop.tenantId,
+      productId: prod._id,
+      type: 'adjustment',
+    });
+    expect(movement).not.toBeNull();
+    expect(movement?.qtyChange).toBe(-3);
+    expect(movement?.balanceAfter).toBe(7);
+  });
 });

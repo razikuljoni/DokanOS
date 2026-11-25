@@ -672,8 +672,14 @@ export function ProductDetailPage(): React.ReactElement {
   const queryClient = useQueryClient();
 
   const canAdjust = user?.role === 'owner' || user?.role === 'manager';
-  const [qtyChange, setQtyChange] = useState<number>(5);
+  const [qtyChangeInput, setQtyChangeInput] = useState<string>('5');
   const [note, setNote] = useState('Physical shelf count adjustment');
+  const parsedQtyChange = Number(qtyChangeInput);
+  const isValidQtyChange =
+    qtyChangeInput.trim() !== '' &&
+    qtyChangeInput.trim() !== '-' &&
+    Number.isInteger(parsedQtyChange) &&
+    parsedQtyChange !== 0;
 
   const { data, isLoading } = useQuery({
     queryKey: ['products', tenant?.id, id],
@@ -687,7 +693,7 @@ export function ProductDetailPage(): React.ReactElement {
         method: 'POST',
         body: JSON.stringify({
           productId: id,
-          qtyChange,
+          qtyChange: parsedQtyChange,
           note,
         }),
       });
@@ -698,7 +704,7 @@ export function ProductDetailPage(): React.ReactElement {
       void queryClient.invalidateQueries({ queryKey: ['dashboard', tenant?.id] });
       addToast({
         title: 'Stock Adjusted',
-        description: `Recorded ${qtyChange > 0 ? `+${qtyChange}` : qtyChange} movement.`,
+        description: `Recorded ${parsedQtyChange > 0 ? `+${parsedQtyChange}` : parsedQtyChange} movement.`,
         variant: 'success',
       });
     },
@@ -810,9 +816,16 @@ export function ProductDetailPage(): React.ReactElement {
                   </Label>
                   <Input
                     id="adj-qty"
-                    type="number"
-                    value={qtyChange}
-                    onChange={(e) => setQtyChange(Number(e.target.value))}
+                    type="text"
+                    inputMode="numeric"
+                    value={qtyChangeInput}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/\s+/g, '');
+                      if (/^-?\d*$/.test(raw)) {
+                        setQtyChangeInput(raw);
+                      }
+                    }}
+                    placeholder="e.g. -3 or 10"
                     className="font-mono tabular-nums"
                   />
                 </div>
@@ -825,7 +838,7 @@ export function ProductDetailPage(): React.ReactElement {
                 <Button
                   size="sm"
                   className="w-full"
-                  disabled={adjustMutation.isPending || qtyChange === 0 || note.trim().length < 3}
+                  disabled={adjustMutation.isPending || !isValidQtyChange || note.trim().length < 3}
                   onClick={() => adjustMutation.mutate()}
                 >
                   {adjustMutation.isPending ? 'Recording...' : 'Record Stock Adjustment'}
