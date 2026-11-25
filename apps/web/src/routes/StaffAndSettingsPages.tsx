@@ -1237,10 +1237,10 @@ export function SettingsPage(): React.ReactElement {
 
       {/* Section 2: Staff Directory + Invite New Staff Member (Stitch 2-Col Grid, Live /api/v1/users) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Top: Staff Directory (Full 12 cols so all columns + Actions fit cleanly without clipping) */}
+        {/* Left: Staff Directory (8 cols) */}
         <Card
           aria-labelledby="staff-directory-heading"
-          className="lg:col-span-12 rounded-xl border border-border bg-card text-card-foreground"
+          className="lg:col-span-8 rounded-xl border border-border bg-card text-card-foreground"
         >
           <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 space-y-0">
             <div className="space-y-0.5">

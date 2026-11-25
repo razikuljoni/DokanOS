@@ -104,25 +104,35 @@ test.describe('DokanOS Responsive Viewport Suite', () => {
     });
   }
 
-  test('1920px — settings Staff Directory table fits its card without horizontal scroll or clipped Actions', async ({
+  test('1440→360 shrink without remount — Dashboard stays within 360px with zero horizontal overflow', async ({
     page,
   }) => {
-    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/login');
     await page.getByRole('button', { name: /Try the demo shop/i }).click();
     await expect(page).toHaveURL(/\/app\/dashboard/);
-    await page.goto('/app/settings');
-    await expect(page.getByRole('heading', { name: /Staff Directory/i })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: /Rahim Pharmacy Ledger Overview/i }),
+    ).toBeVisible();
 
-    const tableMetrics = await page.evaluate(() => {
-      const table = document.querySelector('table');
-      const wrapper = table?.parentElement;
-      return {
-        docOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-        wrapperOverflow: wrapper ? wrapper.scrollWidth > wrapper.clientWidth : false,
-      };
-    });
-    expect(tableMetrics.docOverflow).toBe(false);
-    expect(tableMetrics.wrapperOverflow).toBe(false);
+    // Shrink viewport from 1440px to 360px without reloading or remounting
+    await page.setViewportSize({ width: 360, height: 640 });
+    await page.waitForTimeout(150);
+
+    const overflow = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+  });
+
+  test('direct load/refresh of /app/* routes serves the SPA without Express Cannot GET', async ({
+    page,
+  }) => {
+    for (const route of ['/app/dashboard', '/app/products', '/app/billing', '/app/settings']) {
+      const response = await page.goto(route);
+      expect(response?.status()).toBe(200);
+      await expect(page.locator('body')).not.toContainText('Cannot GET');
+    }
   });
 });

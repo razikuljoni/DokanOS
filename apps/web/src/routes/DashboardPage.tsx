@@ -457,7 +457,7 @@ export function DashboardPage(): React.ReactElement {
 
       {/* Bottom Row: Top 5 Products BarChart + Recent Sales Table */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className="lg:col-span-5">
+        <div className="lg:col-span-5 min-w-0">
           <ChartCard
             title="Top 5 Products by Revenue"
             description="Highest-grossing SKUs in the current period"
@@ -492,7 +492,7 @@ export function DashboardPage(): React.ReactElement {
           </ChartCard>
         </div>
 
-        <div className="lg:col-span-7 space-y-3">
+        <div className="lg:col-span-7 min-w-0 space-y-3">
           <div className="flex items-center justify-between">
             <div>
               <h2 className="font-display text-base font-semibold">Recent POS Invoices</h2>

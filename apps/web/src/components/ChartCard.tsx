@@ -16,15 +16,15 @@ export function ChartCard({
   loading?: boolean;
 }): React.ReactElement {
   return (
-    <Card className="flex flex-col">
+    <Card className="flex flex-col min-w-0">
       <CardHeader className="flex flex-row items-start justify-between gap-4 pb-3">
-        <div className="space-y-1">
+        <div className="space-y-1 min-w-0">
           <CardTitle className="text-base">{title}</CardTitle>
           {description && <CardDescription className="text-xs">{description}</CardDescription>}
         </div>
         {action && <div className="shrink-0">{action}</div>}
       </CardHeader>
-      <CardContent className="flex-1 pt-2">
+      <CardContent className="flex-1 min-w-0 pt-2">
         {loading ? <Skeleton className="h-64 w-full" /> : children}
       </CardContent>
     </Card>

@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import express, { type Express } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
@@ -118,6 +120,33 @@ export function createApiApp(): Express {
   app.use('/api/v1/admin/jobs', jobsRouter);
 
   app.use('/api', notFoundHandler);
+
+  if (env.NODE_ENV === 'production') {
+    const distPath = path.resolve(process.cwd(), 'apps/web/dist');
+    const indexPath = path.join(distPath, 'index.html');
+    if (fs.existsSync(indexPath)) {
+      app.use(
+        express.static(distPath, {
+          setHeaders: (res, filePath) => {
+            if (path.basename(filePath) === 'index.html') {
+              res.setHeader('Cache-Control', 'no-cache');
+            } else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+              res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+            }
+          },
+        }),
+      );
+      app.get('*all', (req, res, next) => {
+        if (req.path.startsWith('/api/') || req.path === '/api' || req.path.startsWith('/assets/')) {
+          next();
+          return;
+        }
+        res.setHeader('Cache-Control', 'no-cache');
+        res.sendFile(indexPath);
+      });
+    }
+  }
+
   app.use(errorHandler);
 
   return app;

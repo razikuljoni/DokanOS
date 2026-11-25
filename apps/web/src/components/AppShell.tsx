@@ -153,12 +153,13 @@ export function AppShell(): React.ReactElement {
             onClick={() => setMobileOpen(false)}
           />
           <aside className="fixed inset-y-0 left-0 w-64 bg-[#1C1917] text-[#FAF7F2] border-r border-[#2E2A26] flex flex-col z-10 shadow-2xl">
-            <div className="h-16 px-4 border-b border-[#2E2A26] flex items-center justify-between gap-2">
+            <div className="min-h-16 py-2.5 px-4 border-b border-[#2E2A26] flex items-center justify-between gap-2">
               <div className="min-w-0">
                 <Link
                   to="/app/dashboard"
                   onClick={() => setMobileOpen(false)}
-                  className="font-display text-base font-bold tracking-tight text-white truncate block"
+                  title={tenant?.name ?? 'DokanOS'}
+                  className="font-display text-sm font-bold tracking-tight text-white break-words leading-tight block"
                 >
                   {tenant?.name ?? 'DokanOS'}
                 </Link>
@@ -236,12 +237,13 @@ export function AppShell(): React.ReactElement {
         )}
       >
         {/* Shop Switcher Header */}
-        <div className="h-16 px-4 border-b border-[#2E2A26] flex items-center justify-between gap-2">
+        <div className="min-h-16 py-2.5 px-4 border-b border-[#2E2A26] flex items-center justify-between gap-2">
           {!sidebarCollapsed && (
             <div className="min-w-0">
               <Link
                 to="/app/dashboard"
-                className="font-display text-base font-bold tracking-tight text-white truncate block"
+                title={tenant?.name ?? 'DokanOS'}
+                className="font-display text-sm font-bold tracking-tight text-white break-words leading-tight block"
               >
                 {tenant?.name ?? 'DokanOS'}
               </Link>
