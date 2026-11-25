@@ -69,6 +69,12 @@ purchasesRouter.post('/', requirePermission('purchases:write'), async (req, res,
     const supplierObjectId = new Types.ObjectId(parsed.supplierId);
 
     const purchaseId = new Types.ObjectId();
+    const costChanges: Array<{
+      productId: string;
+      oldCostPrice: number;
+      newCostPrice: number;
+      supplierName: string;
+    }> = [];
 
     await session.withTransaction(async () => {
       const supplier = await SupplierModel.findOne({
@@ -98,18 +104,11 @@ purchasesRouter.post('/', requirePermission('purchases:write'), async (req, res,
         product.stock += item.qty;
         if (isCostChanged) {
           product.costPrice = item.costPrice;
-          await recordAuditLog({
-            tenantId: req.tenant!.id,
-            userId: req.user!.id,
-            action: 'product.cost_changed',
-            entity: 'Product',
-            entityId: product._id.toString(),
-            changes: {
-              oldCostPrice,
-              newCostPrice: item.costPrice,
-              purchaseId: purchaseId.toString(),
-              supplier: supplier.name,
-            },
+          costChanges.push({
+            productId: product._id.toString(),
+            oldCostPrice,
+            newCostPrice: item.costPrice,
+            supplierName: supplier.name,
           });
         }
         await product.save({ session });
@@ -179,6 +178,22 @@ purchasesRouter.post('/', requirePermission('purchases:write'), async (req, res,
     });
 
     await invalidateTenantCache(req.tenant!.id);
+
+    for (const change of costChanges) {
+      await recordAuditLog({
+        tenantId: req.tenant!.id,
+        userId: req.user!.id,
+        action: 'product.cost_changed',
+        entity: 'Product',
+        entityId: change.productId,
+        changes: {
+          oldCostPrice: change.oldCostPrice,
+          newCostPrice: change.newCostPrice,
+          purchaseId: purchaseId.toString(),
+          supplier: change.supplierName,
+        },
+      });
+    }
 
     await recordAuditLog({
       tenantId: req.tenant!.id,

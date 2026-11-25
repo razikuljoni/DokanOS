@@ -2270,4 +2270,73 @@ it("30. Partial returns accumulate, restock returned quantities, and mark fully 
     });
     expect(notifsAfterSecond.length).toBe(1); // Still exactly 1, no duplicate spam!
   });
+
+  // 39. Phase 0 — Receive purchase end-to-end (record, stock, cost, payable, ledger, audit)
+  it('39. Phase 0 Purchase Receive: creates purchase, increments stock, updates cost, records payable and ledger/audit', async () => {
+    const shop = await registerShop({
+      shopName: 'Phase0 Purchase Shop',
+      email: 'phase0-purchase@dokanos.bd',
+    });
+
+    const supplier = await SupplierModel.create({
+      tenantId: shop.tenantId,
+      name: 'Square Pharma Dist',
+      phone: '01711223344',
+      address: 'Dhaka',
+      totalDue: 0,
+    });
+
+    const prod = await ProductModel.create({
+      tenantId: shop.tenantId,
+      name: 'Seclo 20mg',
+      category: 'Medicine',
+      unit: 'box',
+      costPrice: 50,
+      sellPrice: 70,
+      stock: 5,
+      sku: 'SECLO-20',
+    });
+
+    const purchaseRes = await request(app)
+      .post('/api/v1/purchases')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({
+        supplierId: supplier._id.toString(),
+        items: [{ productId: prod._id.toString(), qty: 10, costPrice: 60 }],
+        paidAmount: 200,
+      });
+
+    expect(purchaseRes.status).toBe(201);
+    expect(purchaseRes.body.data.total).toBe(600);
+    expect(purchaseRes.body.data.paidAmount).toBe(200);
+    expect(purchaseRes.body.data.dueAmount).toBe(400);
+    expect(purchaseRes.body.data.status).toBe('partial');
+
+    const listRes = await request(app)
+      .get('/api/v1/purchases')
+      .set('Authorization', `Bearer ${shop.accessToken}`);
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.data.length).toBe(1);
+
+    const updatedProd = await ProductModel.findById(prod._id);
+    expect(updatedProd?.stock).toBe(15);
+    expect(updatedProd?.costPrice).toBe(60);
+
+    const updatedSupplier = await SupplierModel.findById(supplier._id);
+    expect(updatedSupplier?.totalDue).toBe(400);
+
+    const movement = await StockMovementModel.findOne({
+      tenantId: shop.tenantId,
+      productId: prod._id,
+      type: 'purchase',
+    });
+    expect(movement).not.toBeNull();
+    expect(movement?.qtyChange).toBe(10);
+    expect(movement?.balanceAfter).toBe(15);
+
+    const auditLogs = await AuditLogModel.find({ tenantId: shop.tenantId }).lean();
+    const actions = auditLogs.map((a) => a.action);
+    expect(actions).toContain('purchase.created');
+    expect(actions).toContain('product.cost_changed');
+  });
 });
