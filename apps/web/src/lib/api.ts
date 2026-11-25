@@ -24,7 +24,7 @@ let refreshPromise: Promise<string | null> | null = null;
 
 // Default request timeout to prevent requests from hanging forever if the server
 // is down, stuck on a slow third-party API, or a connection is dropped silently.
-const DEFAULT_TIMEOUT_MS = 15000;
+const DEFAULT_TIMEOUT_MS = 45000;
 
 export async function tryRefreshSession(): Promise<string | null> {
   if (refreshPromise) return refreshPromise;
@@ -99,7 +99,7 @@ export async function apiFetch<T>(
       throw new ApiClientError(
         408,
         'TIMEOUT',
-        'Request timed out: the server took longer than 15 seconds to respond. Please check your internet connection or try again.',
+        'Request timed out: the server took longer than 45 seconds to respond. Please check your internet connection or try again.',
       );
     }
     throw err;

@@ -2339,4 +2339,41 @@ it("30. Partial returns accumulate, restock returned quantities, and mark fully 
     expect(actions).toContain('purchase.created');
     expect(actions).toContain('product.cost_changed');
   });
+
+  // 40. Phase 1 — Settings save persists name, type, and lowStockThreshold across reloads
+  it('40. Phase 1 Settings Save: PATCH /api/v1/tenants/me persists shop name and lowStockThreshold in GET /tenants/me and /auth/me', async () => {
+    const shop = await registerShop({
+      shopName: 'Original Settings Shop',
+      email: 'phase1-settings@dokanos.bd',
+    });
+    await UserModel.updateOne({ _id: shop.userId }, { $set: { emailVerified: true } });
+
+    const patchRes = await request(app)
+      .patch('/api/v1/tenants/me')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({
+        name: 'Renamed Settings Shop',
+        type: 'grocery',
+        lowStockThreshold: 25,
+      });
+
+    expect(patchRes.status).toBe(200);
+    expect(patchRes.body.data.name).toBe('Renamed Settings Shop');
+    expect(patchRes.body.data.type).toBe('grocery');
+    expect(patchRes.body.data.settings.lowStockThreshold).toBe(25);
+
+    const getTenantRes = await request(app)
+      .get('/api/v1/tenants/me')
+      .set('Authorization', `Bearer ${shop.accessToken}`);
+    expect(getTenantRes.status).toBe(200);
+    expect(getTenantRes.body.data.name).toBe('Renamed Settings Shop');
+    expect(getTenantRes.body.data.settings.lowStockThreshold).toBe(25);
+
+    const meRes = await request(app)
+      .get('/api/v1/auth/me')
+      .set('Authorization', `Bearer ${shop.accessToken}`);
+    expect(meRes.status).toBe(200);
+    expect(meRes.body.tenant.name).toBe('Renamed Settings Shop');
+    expect(meRes.body.tenant.settings.lowStockThreshold).toBe(25);
+  });
 });
