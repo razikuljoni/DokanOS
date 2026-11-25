@@ -372,13 +372,13 @@ export function DashboardPage(): React.ReactElement {
 
       {/* Charts Row: Daily Revenue Line Chart + Category Breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className="lg:col-span-8">
+        <div className="lg:col-span-8 min-w-0">
           <ChartCard
             title="Daily Revenue Trend (BDT)"
             description="30-day counter sales aggregated by Asia/Dhaka date"
             loading={trendLoading}
           >
-            <div className="h-64 w-full">
+            <div className="h-64 w-full min-w-0 overflow-hidden">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={trend}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E7E0D4" />
@@ -407,14 +407,14 @@ export function DashboardPage(): React.ReactElement {
           </ChartCard>
         </div>
 
-        <div className="lg:col-span-4">
+        <div className="lg:col-span-4 min-w-0">
           <ChartCard
             title="Sales by Category"
             description="Revenue distribution by product department"
             loading={summaryLoading}
           >
-            <div className="h-64 w-full flex flex-col justify-between">
-              <div className="h-44 w-full">
+            <div className="h-64 w-full min-w-0 flex flex-col justify-between">
+              <div className="h-44 w-full min-w-0 overflow-hidden">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
@@ -463,7 +463,7 @@ export function DashboardPage(): React.ReactElement {
             description="Highest-grossing SKUs in the current period"
             loading={summaryLoading}
           >
-            <div className="h-64 w-full">
+            <div className="h-64 w-full min-w-0 overflow-hidden">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
                   data={summary?.topProducts ?? []}
