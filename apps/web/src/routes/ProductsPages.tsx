@@ -762,7 +762,7 @@ export function ProductDetailPage(): React.ReactElement {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="rounded-md border border-border overflow-hidden">
+              <div className="rounded-md border border-border overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="bg-secondary/60 border-b border-border text-muted-foreground">

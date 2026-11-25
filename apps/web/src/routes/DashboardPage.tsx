@@ -264,7 +264,7 @@ export function DashboardPage(): React.ReactElement {
       {summary && <LowStockBanner count={summary.lowStockCount} />}
 
       {/* KPI Summary Cards (including Today's Total Sales vs Yesterday's Total Sales) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         <StatCard
           label="Today's Total Sales"
           value={formatBDT(todaySales)}

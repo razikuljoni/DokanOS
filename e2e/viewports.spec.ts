@@ -103,4 +103,26 @@ test.describe('DokanOS Responsive Viewport Suite', () => {
       await page.screenshot({ path: `e2e/screenshots/products-${vp.name}.png`, fullPage: true });
     });
   }
+
+  test('1920px — settings Staff Directory table fits its card without horizontal scroll or clipped Actions', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.goto('/login');
+    await page.getByRole('button', { name: /Try the demo shop/i }).click();
+    await expect(page).toHaveURL(/\/app\/dashboard/);
+    await page.goto('/app/settings');
+    await expect(page.getByRole('heading', { name: /Staff Directory/i })).toBeVisible();
+
+    const tableMetrics = await page.evaluate(() => {
+      const table = document.querySelector('table');
+      const wrapper = table?.parentElement;
+      return {
+        docOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+        wrapperOverflow: wrapper ? wrapper.scrollWidth > wrapper.clientWidth : false,
+      };
+    });
+    expect(tableMetrics.docOverflow).toBe(false);
+    expect(tableMetrics.wrapperOverflow).toBe(false);
+  });
 });

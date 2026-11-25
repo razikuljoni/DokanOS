@@ -398,14 +398,14 @@ export function AppShell(): React.ReactElement {
               type="button"
               onClick={toggleDarkMode}
               title="Toggle theme"
-              className="p-2 rounded-md border border-border bg-card hover:bg-secondary text-foreground transition-colors cursor-pointer"
+              className="p-2 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 flex items-center justify-center rounded-md border border-border bg-card hover:bg-secondary text-foreground transition-colors cursor-pointer"
             >
               {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
 
             <Link
               to="/app/alerts"
-              className="relative p-2 rounded-md border border-border bg-card hover:bg-secondary text-foreground transition-colors"
+              className="relative p-2 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 flex items-center justify-center rounded-md border border-border bg-card hover:bg-secondary text-foreground transition-colors"
               title="Notifications & Low-Stock Alerts"
             >
               <Bell className="h-4 w-4" />
@@ -432,7 +432,7 @@ export function AppShell(): React.ReactElement {
         <OfflineBannerAndDrawer />
 
         {/* Page Viewport with 150ms Framer Motion transition */}
-        <main className="flex-1 p-6 max-w-[1360px] w-full mx-auto">
+        <main className="flex-1 p-4 sm:p-6 max-w-[1360px] w-full mx-auto">
           <AnimatePresence mode="wait">
             <motion.div
               key={location.pathname}
