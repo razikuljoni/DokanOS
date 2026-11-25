@@ -55,6 +55,18 @@ const SettingsPage = lazyWithReload(() =>
 const StaffPage = lazyWithReload(() =>
   import('@/routes/StaffAndSettingsPages').then((m) => ({ default: m.StaffPage })),
 );
+const AboutPage = lazyWithReload(() =>
+  import('@/routes/InfoPages').then((m) => ({ default: m.AboutPage })),
+);
+const HelpCenterPage = lazyWithReload(() =>
+  import('@/routes/InfoPages').then((m) => ({ default: m.HelpCenterPage })),
+);
+const PrivacyPolicyPage = lazyWithReload(() =>
+  import('@/routes/InfoPages').then((m) => ({ default: m.PrivacyPolicyPage })),
+);
+const TermsPage = lazyWithReload(() =>
+  import('@/routes/InfoPages').then((m) => ({ default: m.TermsPage })),
+);
 
 function RouteLoading(): React.ReactElement {
   return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
@@ -224,6 +236,10 @@ export default function App(): React.ReactElement {
               <Route path="/forgot-password" element={<ForgotPasswordPage />} />
               <Route path="/reset-password" element={<ResetPasswordPage />} />
               <Route path="/accept-invite" element={<AcceptInvitePage />} />
+              <Route path="/about" element={<AboutPage />} />
+              <Route path="/help" element={<HelpCenterPage />} />
+              <Route path="/privacy" element={<PrivacyPolicyPage />} />
+              <Route path="/terms" element={<TermsPage />} />
 
               <Route path="/app" element={<ProtectedAppRoutes />}>
                 <Route index element={<Navigate to="/app/dashboard" replace />} />

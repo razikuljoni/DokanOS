@@ -69,6 +69,7 @@ interface DashboardSummary {
     customerName: string;
     paymentMethod: string;
     paymentStatus: string;
+    isReturned?: boolean;
     total: number;
     dueAmount: number;
     createdAt: string;
@@ -185,22 +186,25 @@ export function DashboardPage(): React.ReactElement {
     {
       key: 'payment',
       header: 'Method / Status',
-      render: (row) => (
-        <span className="text-xs text-muted-foreground">
-          {row.paymentMethod.toUpperCase()} ·{' '}
-          <span
-            className={
-              row.paymentStatus === 'paid'
-                ? 'text-primary font-medium'
-                : row.paymentStatus === 'partial'
-                  ? 'text-warning font-medium'
-                  : 'text-destructive font-medium'
-            }
-          >
-            {row.paymentStatus.toUpperCase()}
+      render: (row) =>
+        row.isReturned ? (
+          <span className="text-xs font-medium text-destructive">RETURNED</span>
+        ) : (
+          <span className="text-xs text-muted-foreground">
+            {row.paymentMethod.toUpperCase()} ·{' '}
+            <span
+              className={
+                row.paymentStatus === 'paid'
+                  ? 'text-primary font-medium'
+                  : row.paymentStatus === 'partial'
+                    ? 'text-warning font-medium'
+                    : 'text-destructive font-medium'
+              }
+            >
+              {row.paymentStatus.toUpperCase()}
+            </span>
           </span>
-        </span>
-      ),
+        ),
     },
     {
       key: 'date',

@@ -919,9 +919,9 @@ export function LandingPage(): React.ReactElement {
             </div>
             <ul className="space-y-2 text-xs">
               <li>
-                <a href="#top" className="hover:text-[#1C1917] transition-colors">
+                <Link to="/about" className="hover:text-[#1C1917] transition-colors">
                   About
-                </a>
+                </Link>
               </li>
               <li>
                 <a href="#guarantee" className="hover:text-[#1C1917] transition-colors">
@@ -929,20 +929,14 @@ export function LandingPage(): React.ReactElement {
                 </a>
               </li>
               <li>
-                <a
-                  href="mailto:support@dokan-os.demo?subject=Careers%20Inquiry"
-                  className="hover:text-[#1C1917] transition-colors"
-                >
-                  Careers
-                </a>
+                <Link to="/privacy" className="hover:text-[#1C1917] transition-colors">
+                  Privacy Policy
+                </Link>
               </li>
               <li>
-                <a
-                  href="mailto:support@dokan-os.demo?subject=Contact%20DokanOS"
-                  className="hover:text-[#1C1917] transition-colors"
-                >
-                  Contact
-                </a>
+                <Link to="/terms" className="hover:text-[#1C1917] transition-colors">
+                  Terms of Service
+                </Link>
               </li>
             </ul>
           </div>
@@ -953,12 +947,9 @@ export function LandingPage(): React.ReactElement {
             </div>
             <ul className="space-y-2 text-xs">
               <li>
-                <a
-                  href="mailto:support@dokan-os.demo?subject=Help%20Center%20Support"
-                  className="hover:text-[#1C1917] transition-colors"
-                >
+                <Link to="/help" className="hover:text-[#1C1917] transition-colors">
                   Help Center
-                </a>
+                </Link>
               </li>
               <li>
                 <a href="#billing" className="hover:text-[#1C1917] transition-colors">

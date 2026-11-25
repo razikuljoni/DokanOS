@@ -2460,4 +2460,52 @@ it("30. Partial returns accumulate, restock returned quantities, and mark fully 
     expect(movement?.qtyChange).toBe(-3);
     expect(movement?.balanceAfter).toBe(7);
   });
+
+  // 43. Phase 4 — Dues payments are written to Tenant Audit Log
+  it('43. Phase 4 Dues Audit Log: recording a due payment writes due.payment_recorded to AuditLogModel', async () => {
+    const shop = await registerShop({
+      shopName: 'Phase4 Dues Audit Shop',
+      email: 'phase4-dues@dokanos.bd',
+    });
+
+    const prod = await ProductModel.create({
+      tenantId: shop.tenantId,
+      name: 'Ace Plus',
+      category: 'Medicine',
+      unit: 'pcs',
+      costPrice: 20,
+      sellPrice: 30,
+      stock: 10,
+      sku: 'ACE-PLUS',
+    });
+
+    const saleRes = await request(app)
+      .post('/api/v1/sales')
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({
+        items: [{ productId: prod._id.toString(), qty: 2 }],
+        paymentMethod: 'cash',
+        paidAmount: 0,
+        customerName: 'Karim Mia',
+        customerPhone: '01799887766',
+      });
+    expect(saleRes.status).toBe(201);
+    const saleId = saleRes.body.data._id as string;
+
+    const payRes = await request(app)
+      .post(`/api/v1/dues/${saleId}/payments`)
+      .set('Authorization', `Bearer ${shop.accessToken}`)
+      .send({ amount: 40, method: 'cash' });
+    expect(payRes.status).toBe(201);
+
+    const audit = await AuditLogModel.findOne({
+      tenantId: shop.tenantId,
+      action: 'due.payment_recorded',
+      entityId: saleId,
+    }).lean();
+    expect(audit).not.toBeNull();
+    expect(audit?.changes.payer).toBe('Karim Mia');
+    expect(audit?.changes.amount).toBe(40);
+    expect(audit?.changes.resultingBalance).toBe(20);
+  });
 });

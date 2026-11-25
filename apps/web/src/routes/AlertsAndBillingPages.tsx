@@ -765,6 +765,7 @@ export function BillingPage(): React.ReactElement {
     setCustomerCity('Dhaka');
     setPhoneError(null);
     setAddressError(null);
+    setCityError(null);
   };
 
   const [sandboxModal, setSandboxModal] = useState<{
@@ -787,6 +788,8 @@ export function BillingPage(): React.ReactElement {
   });
 
   const [cardNumber, setCardNumber] = useState('4111111111111111');
+  const [cardExpiry, setCardExpiry] = useState('12/26');
+  const [cardCvc, setCardCvc] = useState('111');
   const [otp, setOtp] = useState('123456');
 
   const { data, isLoading } = useQuery({
@@ -1166,7 +1169,9 @@ export function BillingPage(): React.ReactElement {
 
                   <div className="space-y-2 text-xs">
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">Staff & Manager Accounts</span>
+                      <span className="text-muted-foreground">
+                        Active Staff &amp; Manager Accounts (excl. Owner)
+                      </span>
                       <span className="font-mono tabular-nums font-semibold">
                         {billing?.usage.staffCount ?? 0} / {billing?.limits.maxStaff ?? 1}
                       </span>
@@ -1388,10 +1393,12 @@ export function BillingPage(): React.ReactElement {
                           className="h-6 text-[11px] px-2"
                           onClick={() => {
                             setCardNumber('4242424242424242');
+                            setCardExpiry('12/26');
+                            setCardCvc('111');
                             setOtp('123456');
                           }}
                         >
-                          Fill test card
+                          Fill test details
                         </Button>
                       </div>
                       <div className="grid grid-cols-2 gap-1.5 text-[11px] font-mono text-muted-foreground">
@@ -1400,7 +1407,10 @@ export function BillingPage(): React.ReactElement {
                           <strong className="text-foreground">4242 4242 4242 4242</strong>
                         </div>
                         <div>
-                          Expiry: <strong className="text-foreground">12/26 (CVC 111)</strong>
+                          Expiry / CVC: <strong className="text-foreground">12/26 · 111</strong>
+                        </div>
+                        <div>
+                          OTP: <strong className="text-foreground">123456</strong>
                         </div>
                       </div>
                     </div>
@@ -1535,6 +1545,8 @@ export function BillingPage(): React.ReactElement {
                       } else {
                         setCardNumber('4242424242424242');
                       }
+                      setCardExpiry('12/26');
+                      setCardCvc('111');
                       setOtp('123456');
                     }}
                   >
@@ -1547,10 +1559,28 @@ export function BillingPage(): React.ReactElement {
                   onChange={(e) => setCardNumber(e.target.value)}
                   className="font-mono"
                 />
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-3 gap-3">
                   <div className="space-y-1">
-                    <Label className="text-xs">Expiry / CVV</Label>
-                    <Input value="12/26 · 111" readOnly className="font-mono text-xs" />
+                    <Label htmlFor="test-expiry" className="text-xs">
+                      Expiry
+                    </Label>
+                    <Input
+                      id="test-expiry"
+                      value={cardExpiry}
+                      onChange={(e) => setCardExpiry(e.target.value)}
+                      className="font-mono text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="test-cvc" className="text-xs">
+                      CVC
+                    </Label>
+                    <Input
+                      id="test-cvc"
+                      value={cardCvc}
+                      onChange={(e) => setCardCvc(e.target.value)}
+                      className="font-mono text-xs"
+                    />
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="test-otp" className="text-xs">

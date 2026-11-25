@@ -347,27 +347,26 @@ export function SalesListPage(): React.ReactElement {
     {
       key: 'status',
       header: 'Payment / Status',
-      render: (row) => (
-        <span className="text-xs">
-          <span className="uppercase text-muted-foreground">
-            {row.isReturned ? 'RETURNED' : row.paymentMethod}
-          </span>
-          {!row.isReturned && <span aria-hidden="true"> · </span>}
-          <span
-            className={
-              row.isReturned
-                ? 'text-destructive font-medium'
-                : row.paymentStatus === 'paid'
+      render: (row) =>
+        row.isReturned ? (
+          <span className="text-xs text-destructive font-medium">RETURNED</span>
+        ) : (
+          <span className="text-xs">
+            <span className="uppercase text-muted-foreground">{row.paymentMethod}</span>
+            <span aria-hidden="true"> · </span>
+            <span
+              className={
+                row.paymentStatus === 'paid'
                   ? 'text-primary font-medium'
                   : row.paymentStatus === 'partial'
                     ? 'text-warning font-medium'
                     : 'text-destructive font-medium'
-            }
-          >
-            {row.isReturned ? 'RETURNED' : row.paymentStatus.toUpperCase()}
+              }
+            >
+              {row.paymentStatus.toUpperCase()}
+            </span>
           </span>
-        </span>
-      ),
+        ),
     },
     {
       key: 'date',

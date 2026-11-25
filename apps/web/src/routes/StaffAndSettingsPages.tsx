@@ -273,7 +273,7 @@ export function StaffPage(): React.ReactElement {
             <CardHeader>
               <CardTitle>Invite Staff or Manager</CardTitle>
               <CardDescription>
-                Generates a one-time setup link (default demo password: <code>Staff1234!</code>).
+                Generates a one-time setup link so the staff member can set their own password.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
